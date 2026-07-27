@@ -275,7 +275,7 @@ fn get_file_info(path: String) -> Result<FileInfo, String> {
 /// 统一打印管线：文件 -> PDF（第一层）-> 系统打印 API（第二层）。
 /// 全程不打开任何第三方应用窗口。
 #[tauri::command]
-async fn print_file(_app: tauri::AppHandle, path: String, printer_name: String) -> Result<String, String> {
+async fn print_file(app: tauri::AppHandle, path: String, printer_name: String) -> Result<String, String> {
     info!(target: "print", "print_file: {} -> printer {:?}", path, printer_name);
     let input = Path::new(&path);
 
