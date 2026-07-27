@@ -86,12 +86,6 @@ jobs:
   universal:
     needs: [macos-arm64, macos-x86]
     runs-on: macos-latest
-          if-no-files-found: error
-
-  # ── Universal Binary（合并两个架构） ──────────────
-  universal:
-    needs: macos
-    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
