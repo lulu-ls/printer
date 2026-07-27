@@ -1,0 +1,43 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicedoc/tauri-docs/main/packages/api/schemas/config.schema.json",
+  "productName": "打印机助手",
+  "version": "1.0.0",
+  "identifier": "com.printer.assistant",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "打印机助手",
+        "width": 500,
+        "height": 700,
+        "minWidth": 480,
+        "minHeight": 640,
+        "resizable": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app"],
+    "icon": [
+      "icons/icon_16x16.png",
+      "icons/icon_16x16@2x.png",
+      "icons/icon_32x32.png",
+      "icons/icon_32x32@2x.png",
+      "icons/icon_128x128.png",
+      "icons/icon_128x128@2x.png",
+      "icons/icon_256x256.png",
+      "icons/icon_256x256@2x.png",
+      "icons/icon_512x512.png",
+      "icons/icon_512x512@2x.png",
+      "icons/AppIcon.icns"
+    ]
+  }
+}

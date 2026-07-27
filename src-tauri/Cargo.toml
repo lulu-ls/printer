@@ -1,0 +1,34 @@
+[package]
+name = "printer-assistant"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "printer_assistant_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-shell = "2"
+log = { version = "0.4", features = ["std"] }
+chrono = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+image = "0.25"
+windows = { version = "0.61", features = [
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Printing",
+    "Win32_Storage_Xps",
+    "Win32_Foundation",
+    "Win32_Security",
+] }
+
+# macOS 上 windows-future 依赖 windows-core::imp::IMarshal/marshaler
+# 但 windows-core 的 imp/windows.rs 仅在 cfg(windows) 下 include
+# 导致 macOS 编译失败。用本地空桩替换。
+[patch.crates-io]
+windows-future = { path = "patches/windows-future" }

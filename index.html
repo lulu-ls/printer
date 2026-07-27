@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>打印机助手</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <div class="window">
+    <!-- 标题栏 -->
+    <div class="titlebar" id="titlebar">
+      <span class="titlebar-title" data-i18n="appTitle">打印机助手</span>
+    </div>
+
+    <!-- 内容区 -->
+    <div class="content" id="content">
+
+      <!-- ===== 空状态：大拖拽区 ===== -->
+      <div class="empty-state" id="emptyState">
+        <div class="empty-dropzone" id="emptyDropZone">
+          <div class="empty-icon-circle">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="17 8 12 3 7 8"/>
+              <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+          </div>
+          <div class="empty-title" data-i18n="emptyTitle">拖拽文件到此处，或点击选择</div>
+          <div class="empty-subtitle" data-i18n="emptySubtitle">支持 PNG、JPG、JPEG、PDF 等常见格式</div>
+        </div>
+      </div>
+
+      <!-- ===== 文件列表页 ===== -->
+      <div class="file-page" id="filePage" style="display:none">
+        <!-- 拖放上传区（可折叠 + 吸顶） -->
+        <div class="dropzone" id="dropZone">
+          <div class="add-icon">+</div>
+          <div class="dropzone-text">
+            <span class="dropzone-title" data-i18n="addFiles">添加更多文件</span>
+            <span class="dropzone-subtitle" data-i18n="emptySubtitle">支持 PNG、JPG、JPEG、PDF 等常见格式</span>
+          </div>
+        </div>
+
+        <!-- 文件列表 -->
+        <div class="file-section" id="fileSection">
+          <div class="file-list-header">
+            <span class="file-list-title" id="fileListTitle">文件列表（0）</span>
+            <button class="clear-btn" id="clearBtn" type="button">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
+                <polyline points="3 6 5 6 21 6"/>
+                <path d="M19 6l-1 14H6L5 6"/>
+                <path d="M10 11v6M14 11v6"/>
+                <path d="M9 6V4h6v2"/>
+              </svg>
+              <span data-i18n="clearList">清空列表</span>
+            </button>
+          </div>
+          <div class="file-cards" id="fileCards"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 底部工具栏 -->
+    <div class="bottom-bar" id="bottomBar" style="display:none">
+      <div class="printer-status" id="printerCard">
+        <span class="printer-status-dot" id="printerDot" style="display:none"></span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="36" height="36">
+          <polyline points="6 9 6 2 18 2 18 9"/>
+          <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+          <rect x="6" y="14" width="12" height="8"/>
+          <line x1="9" y1="7" x2="15" y2="7"/>
+        </svg>
+        <div class="printer-status-text">
+          <span class="printer-status-title" id="printerTitle">暂未检测到打印机</span>
+          <span class="printer-status-desc" id="printerDesc">请检查打印机连接或驱动是否安装</span>
+        </div>
+        <svg class="printer-caret" id="printerCaret" style="display:none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+      </div>
+      <div class="print-btn-wrap" id="printBtnWrap">
+        <button class="print-btn" id="printBtn" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20">
+            <polyline points="6 9 6 2 18 2 18 9"/>
+            <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+            <rect x="6" y="14" width="12" height="8"/>
+          </svg>
+          <span data-i18n="printBtn">开始打印</span>
+        </button>
+        <div class="print-btn-tooltip" id="printBtnTooltip"></div>
+      </div>
+    </div>
+
+    <!-- 打印机选择弹出层 -->
+    <div class="printer-popup" id="printerPopup" style="display:none">
+      <div class="printer-popup-list" id="printerPopupList"></div>
+    </div>
+
+    <!-- 拖拽遮罩 -->
+    <div class="drag-overlay" id="dragOverlay" style="display:none">
+      <div class="drag-overlay-card">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/>
+          <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        <div data-i18n="dropToAdd">释放以添加文件</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- LibreOffice 提示弹窗 -->
+  <div class="modal-mask" id="loModal" style="display:none">
+    <div class="modal">
+      <div class="modal-title" data-i18n="loTitle">需要 LibreOffice</div>
+      <div class="modal-msg" id="loModalMsg"></div>
+      <div class="modal-actions">
+        <button class="btn-primary" id="loDownloadBtn" type="button"><span data-i18n="loDownload">下载 LibreOffice</span></button>
+        <button class="btn-ghost" id="loSkipBtn" type="button"><span data-i18n="loSkip">跳过这些文件</span></button>
+        <button class="btn-text" id="loCancelBtn" type="button"><span data-i18n="cancel">取消</span></button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

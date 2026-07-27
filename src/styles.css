@@ -1,0 +1,844 @@
+/* =====================================================
+   全局重置
+   ===================================================== */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+  background: #e5e5e5;
+  margin: 0;
+  height: 100vh;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* =====================================================
+   窗口容器
+   ===================================================== */
+.window {
+  width: 100%;
+  height: 100%;
+  background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* =====================================================
+   标题栏
+   ===================================================== */
+.titlebar {
+  height: 44px;
+  background: #3a3a3a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  flex-shrink: 0;
+  border-radius: 12px 12px 0 0;
+}
+
+.titlebar-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: rgba(255,255,255,0.90);
+  letter-spacing: 0.3px;
+}
+
+/* =====================================================
+   内容区
+   ===================================================== */
+.content {
+  flex: 1;
+  background: #f5f5f7;
+  padding: 32px 32px 0 32px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+/* =====================================================
+   空状态
+   ===================================================== */
+.empty-state {
+  /* 绝对定位覆盖层：脱离文档流，避免过渡时挤动下方文件列表造成跳动/闪烁 */
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f5f5f7;
+  z-index: 2;
+}
+
+.empty-dropzone {
+  width: 480px;
+  max-width: 90%;
+  height: 200px;
+  background: #eeeef8;
+  border: 2px dashed #a0a8d8;
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.empty-dropzone:hover,
+.empty-dropzone.drag-over {
+  background: #e6e6f5;
+  border-color: #7b82d0;
+}
+
+.empty-icon-circle {
+  width: 64px;
+  height: 64px;
+  background: #f0f0f8;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #7070c8;
+}
+
+.empty-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: #1a1a2e;
+}
+
+.empty-subtitle {
+  font-size: 13px;
+  color: #8888a8;
+}
+
+/* =====================================================
+   文件列表页
+   ===================================================== */
+.file-page {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  flex: 1;
+  min-height: 0;
+}
+
+/* =====================================================
+   拖放上传区（可折叠 + 吸顶）
+   ===================================================== */
+.dropzone {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  height: 160px;
+  background: #eeeef8;
+  border: 2px dashed #a0a8d8;
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  cursor: pointer;
+  transition: height 0.3s ease, border-radius 0.3s ease, background 0.2s, border-color 0.2s, gap 0.3s ease, padding 0.3s ease;
+  flex-shrink: 0;
+  overflow: hidden;
+  padding: 24px 16px;
+}
+
+.dropzone.compact {
+  height: 52px;
+  flex-direction: row;
+  gap: 10px;
+  border-radius: 14px;
+  padding: 0 16px;
+}
+
+.dropzone:hover,
+.dropzone.drag-over {
+  background: #e6e6f5;
+  border-color: #7b82d0;
+}
+
+/* + 号圆形图标 */
+.add-icon {
+  width: 48px;
+  height: 48px;
+  background: #4b6bfb;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  font-size: 28px;
+  font-weight: 300;
+  line-height: 1;
+  flex-shrink: 0;
+  transition: width 0.3s ease, height 0.3s ease, font-size 0.3s ease;
+}
+.dropzone.compact .add-icon {
+  width: 32px;
+  height: 32px;
+  font-size: 20px;
+}
+
+/* 文字区域 */
+.dropzone-text {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  transition: opacity 0.25s ease;
+}
+.dropzone.compact .dropzone-text {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.dropzone-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: #1a1a2e;
+  white-space: nowrap;
+  transition: font-size 0.3s ease;
+}
+.dropzone.compact .dropzone-title {
+  font-size: 14px;
+}
+
+.dropzone-subtitle {
+  font-size: 13px;
+  font-weight: 400;
+  color: #8888a8;
+  white-space: nowrap;
+  transition: font-size 0.3s ease, opacity 0.25s ease;
+}
+.dropzone.compact .dropzone-subtitle {
+  font-size: 12px;
+}
+
+/* =====================================================
+   文件列表区
+   ===================================================== */
+.file-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  /* 滚动条不占用宽度 */
+  scrollbar-width: thin;
+}
+
+.file-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.file-list-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1a1a2e;
+}
+
+.clear-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 400;
+  color: #666680;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.15s;
+}
+
+.clear-btn:hover { color: #333; }
+
+/* =====================================================
+   文件卡片
+   ===================================================== */
+.file-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.file-card {
+  background: #ffffff;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.file-card.failed {
+  background: #fff4f4;
+  border-color: #ffb3b3;
+}
+
+.file-type-badge {
+  width: 48px;
+  height: 48px;
+  background: #ededf8;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: #7070c8;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.file-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.file-name {
+  font-size: 15px;
+  font-weight: 500;
+  color: #1a1a2e;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-size {
+  font-size: 13px;
+  font-weight: 400;
+  color: #8888a8;
+}
+
+.file-status-tag.fail {
+  min-width: 52px;
+  padding: 4px 10px;
+  background: #ffe0e0;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #d93025;
+  text-align: center;
+  flex-shrink: 0;
+  cursor: help;
+}
+
+.file-delete-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  border-radius: 8px;
+  color: #999ab0;
+  transition: color 0.15s, background 0.15s;
+  flex-shrink: 0;
+}
+
+.file-delete-btn:hover {
+  color: #555;
+  background: #f0f0f5;
+}
+
+.file-delete-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* =====================================================
+   底部工具栏
+   ===================================================== */
+.bottom-bar {
+  background: #ffffff;
+  border-top: 1px solid #e5e5ea;
+  padding: 16px 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  gap: 16px;
+}
+
+.printer-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #f2f2f7;
+  border-radius: 14px;
+  padding: 0 14px;
+  height: 56px;
+  cursor: pointer;
+  transition: background 0.15s;
+  position: relative;
+  min-width: 0;
+  flex: 0 1 auto;
+  max-width: 50%;
+}
+
+/* 打印机在线状态小圆点 */
+.printer-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #c0c0d0; /* 默认灰：未知/查询中状态 */
+  transition: background 0.3s, box-shadow 0.3s;
+}
+.printer-status-dot.online {
+  background: #34c759;
+  box-shadow: 0 0 6px rgba(52, 199, 89, 0.5);
+}
+.printer-status-dot.offline {
+  background: #ff3b30;
+  box-shadow: 0 0 6px rgba(255, 59, 48, 0.4);
+}
+
+.printer-status:hover { background: #eaeaef; }
+.printer-status.no-printer { cursor: default; }
+.printer-status.no-printer:hover { background: #f2f2f7; }
+
+.printer-status svg {
+  color: #555570;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+}
+
+.printer-status-text {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+.printer-status.no-printer .printer-status-text {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+}
+
+.printer-status-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1a1a2e;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.printer-status-desc {
+  font-size: 13px;
+  font-weight: 400;
+  color: #555570;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.printer-status.no-printer .printer-status-desc {
+  white-space: normal;
+  font-size: 11px;
+  line-height: 1.3;
+  color: #8888a8;
+}
+
+.printer-caret {
+  color: #8888a8;
+  flex-shrink: 0;
+  transition: transform 0.15s;
+}
+
+.printer-status.open .printer-caret {
+  transform: rotate(180deg);
+}
+
+/* 打印机弹出菜单 */
+.printer-popup {
+  position: fixed;
+  bottom: 80px;
+  left: 32px;
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.12);
+  overflow: hidden;
+  z-index: 100;
+  min-width: 260px;
+}
+
+.printer-popup-item {
+  padding: 10px 16px;
+  font-size: 14px;
+  color: #1a1a2e;
+  cursor: pointer;
+  transition: background 0.1s;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.printer-popup-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #c0c0d0;
+  transition: background 0.3s;
+}
+.printer-popup-dot.online {
+  background: #34c759;
+}
+.printer-popup-dot.offline {
+  background: #ff3b30;
+}
+
+.printer-popup-item:hover {
+  background: #f5f5f7;
+}
+
+.printer-popup-item.active {
+  color: #2563eb;
+  font-weight: 600;
+}
+
+/* =====================================================
+   打印按钮
+   ===================================================== */
+.print-btn-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.print-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-width: 180px;
+  height: 56px;
+  background: #2563eb;
+  border: none;
+  border-radius: 14px;
+  font-size: 17px;
+  font-weight: 600;
+  color: #ffffff;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.1s;
+  padding: 0 28px;
+}
+
+.print-btn:hover  { background: #1d4ed8; }
+.print-btn:active { transform: scale(0.97); }
+.print-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 打印按钮禁用时的悬浮提示 */
+.print-btn-tooltip {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1a1a2e;
+  color: #ffffff;
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 100;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+}
+.print-btn-tooltip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: #1a1a2e;
+}
+.print-btn-tooltip.show {
+  display: block;
+}
+
+/* =====================================================
+   拖拽遮罩
+   ===================================================== */
+.drag-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(24,24,27,0.65);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.drag-overlay-card {
+  background: #ffffff;
+  border-radius: 18px;
+  padding: 48px 64px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  color: #1a1a2e;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.drag-overlay-card svg {
+  width: 60px;
+  height: 60px;
+  color: #7070c8;
+}
+
+/* =====================================================
+   通知提示
+   ===================================================== */
+.toast {
+  position: fixed;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1a1a2e;
+  color: #ffffff;
+  padding: 10px 24px;
+  border-radius: 8px;
+  font-size: 14px;
+  z-index: 2000;
+  animation: toastIn 0.3s ease;
+  pointer-events: none;
+}
+
+@keyframes toastIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(-12px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* =====================================================
+   文件名悬停浮框
+   ===================================================== */
+.name-tooltip {
+  position: fixed;
+  background: rgba(26, 26, 46, 0.95);
+  color: #ffffff;
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 6px 10px;
+  border-radius: 6px;
+  z-index: 3000;
+  pointer-events: none;
+  max-width: 320px;
+  word-break: break-all;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);
+}
+
+/* =====================================================
+   LibreOffice 提示弹窗
+   ===================================================== */
+.modal-mask {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.38);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 4000;
+}
+
+.modal {
+  width: 360px;
+  max-width: 86%;
+  background: #ffffff;
+  border-radius: 14px;
+  padding: 24px 22px 18px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.28);
+  text-align: center;
+}
+
+.modal-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: #1a1a2e;
+  margin-bottom: 10px;
+}
+
+.modal-msg {
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: #666;
+  margin-bottom: 20px;
+}
+
+.modal-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.modal-actions button {
+  border: none;
+  border-radius: 9px;
+  padding: 11px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.btn-primary {
+  background: #5b5be0;
+  color: #ffffff;
+}
+.btn-primary:hover {
+  background: #4a4ad0;
+}
+
+.btn-ghost {
+  background: #ededf8;
+  color: #5b5be0;
+}
+.btn-ghost:hover {
+  background: #e0e0f4;
+}
+
+.btn-text {
+  background: transparent;
+  color: #999;
+}
+.btn-text:hover {
+  background: #f4f4f4;
+}
+
+/* =====================================================
+   过渡动画：空状态 ↔ 文件列表 / 文件卡片进场退场
+   ===================================================== */
+/* 空状态：拖入文件时整体上移淡出，让位给文件列表页 */
+.empty-state {
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+.empty-state.is-hiding {
+  opacity: 0;
+  transform: translateY(-36px);
+  pointer-events: none;
+}
+
+/* 文件列表页：仅淡入（不做位移，避免"弹出来"的闪烁） */
+.file-page {
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+.file-page.is-showing {
+  opacity: 1;
+}
+
+/* 单个文件卡片进场 / 退场 */
+.file-card--enter {
+  animation: fileCardIn 0.36s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.file-card--exit {
+  animation: fileCardOut 0.38s ease forwards;
+  pointer-events: none;
+}
+
+@keyframes fileCardIn {
+  from { opacity: 0; transform: translateY(-12px) scale(0.96); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes fileCardOut {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+/* =====================================================
+   打印中状态
+   ===================================================== */
+.file-card.printing {
+  opacity: 0.65;
+  pointer-events: none;
+}
+
+.file-status-tag.printing {
+  min-width: 52px;
+  padding: 4px 10px;
+  background: #e0e8ff;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #4b6bfb;
+  text-align: center;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.file-status-tag.queued {
+  min-width: 52px;
+  padding: 4px 10px;
+  background: #f0f0f5;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #8888a8;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.file-card.queued {
+  opacity: 0.6;
+}
+
+.file-cards.printing .file-delete-btn {
+  pointer-events: none;
+  opacity: 0.3;
+}
+
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #4b6bfb;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  vertical-align: middle;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* 碎片粒子（JS Web Animations API 控制运动） */
+.particle {
+  position: fixed;
+  pointer-events: none;
+  z-index: 9999;
+}

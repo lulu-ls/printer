@@ -1,0 +1,653 @@
+mod converter;
+mod pdf;
+mod printer;
+mod logger;
+
+use log::{error, info};
+use serde::Serialize;
+use std::path::Path;
+use std::path::PathBuf;
+use std::process::Command;
+use tauri::menu::{CheckMenuItem, Menu, Submenu};
+use tauri::Manager;
+use tauri::Emitter;
+
+// ── Windows 原生打印机枚举（零进程、瞬时，彻底规避 PowerShell 启动卡顿） ──
+#[cfg(target_os = "windows")]
+use std::sync::{Mutex, OnceLock};
+#[cfg(target_os = "windows")]
+use std::time::{Duration, Instant};
+#[cfg(target_os = "windows")]
+use windows::core::PWSTR;
+#[cfg(target_os = "windows")]
+use windows::Win32::Graphics::Printing::PRINTER_HANDLE;
+
+#[cfg(target_os = "windows")]
+struct PrinterCache {
+    at: Instant,
+    printers: Vec<(String, bool)>,
+}
+
+#[cfg(target_os = "windows")]
+static PRINTER_CACHE: OnceLock<Mutex<Option<PrinterCache>>> = OnceLock::new();
+
+/// 带 3 秒 TTL 的缓存：避免频繁打开/收起弹窗时重复枚举打印机。
+/// 名称用 EnumPrintersW 一次性枚举；在线状态逐个 OpenPrinter 取最新值
+/// （EnumPrinters 返回的 Status 多为缓存态、对离线/网络打印机不可靠，
+///  等价于 PowerShell Get-Printer 的 PrinterStatus）。
+#[cfg(target_os = "windows")]
+fn cached_printers() -> Vec<(String, bool)> {
+    let cell = PRINTER_CACHE.get_or_init(|| Mutex::new(None));
+    let mut guard = cell.lock().unwrap();
+    let now = Instant::now();
+    if let Some(c) = guard.as_ref() {
+        if now.duration_since(c.at) < Duration::from_secs(2) {
+            return c.printers.clone();
+        }
+    }
+    let names = enum_printer_names();
+    let printers: Vec<(String, bool)> = names
+        .into_iter()
+        .map(|n| {
+            let online = printer_online_status(&n);
+            (n, online)
+        })
+        .collect();
+    *guard = Some(PrinterCache {
+        at: now,
+        printers: printers.clone(),
+    });
+    printers
+}
+
+/// 用 EnumPrintersW 一次性拿到全部打印机名称（轻量）。
+#[cfg(target_os = "windows")]
+fn enum_printer_names() -> Vec<String> {
+    use windows::Win32::Graphics::Printing::{
+        EnumPrintersW, PRINTER_ENUM_CONNECTIONS, PRINTER_ENUM_LOCAL, PRINTER_INFO_2W,
+    };
+    use windows::core::PCWSTR;
+
+    let flags = PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS;
+    let mut needed: u32 = 0;
+    let mut returned: u32 = 0;
+    // 第一次调用：仅获取所需缓冲区大小（pprinterenum 传 None）
+    let _ = unsafe {
+        EnumPrintersW(flags, PCWSTR::null(), 2, None, &mut needed, &mut returned)
+    };
+    if needed == 0 {
+        return Vec::new();
+    }
+    let mut buf: Vec<u8> = vec![0u8; needed as usize];
+    let res = unsafe {
+        EnumPrintersW(
+            flags,
+            PCWSTR::null(),
+            2,
+            Some(buf.as_mut_slice()),
+            &mut needed,
+            &mut returned,
+        )
+    };
+    if res.is_err() {
+        return Vec::new();
+    }
+
+    let count = returned as usize;
+    let arr = buf.as_ptr() as *const PRINTER_INFO_2W;
+    let mut out = Vec::with_capacity(count);
+    for i in 0..count {
+        let info = unsafe { &*arr.add(i) };
+        let name = unsafe { pwstr_to_string(info.pPrinterName) };
+        if !name.is_empty() {
+            out.push(name);
+        }
+    }
+    out
+}
+
+/// 逐个打开打印机读取真实在线状态（等价于 PowerShell Get-Printer 的 PrinterStatus）。
+/// 离线/打不开/缺纸/缺墨/需人工干预/手动"脱机工作"等任意条件满足即判为离线。
+#[cfg(target_os = "windows")]
+fn printer_online_status(name: &str) -> bool {
+    use windows::Win32::Graphics::Printing::{ClosePrinter, OpenPrinterW};
+    use windows::core::PCWSTR;
+
+    let wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+    let mut h = PRINTER_HANDLE::default();
+    // 打不开（如连接失败）即视为离线/不可用
+    if unsafe { OpenPrinterW(PCWSTR(wide.as_ptr()), &mut h, None) }.is_err() {
+        return false;
+    }
+    let online = unsafe { get_printer_status(h) };
+    let _ = unsafe { ClosePrinter(h) };
+    online
+}
+
+#[cfg(target_os = "windows")]
+unsafe fn get_printer_status(h: PRINTER_HANDLE) -> bool {
+    use windows::Win32::Graphics::Printing::{
+        GetPrinterW, PRINTER_INFO_2W, PRINTER_ATTRIBUTE_WORK_OFFLINE,
+        PRINTER_STATUS_DOOR_OPEN, PRINTER_STATUS_ERROR, PRINTER_STATUS_NO_TONER,
+        PRINTER_STATUS_NOT_AVAILABLE, PRINTER_STATUS_OFFLINE, PRINTER_STATUS_PAPER_OUT,
+        PRINTER_STATUS_USER_INTERVENTION,
+    };
+
+    let mut needed: u32 = 0;
+    // 第一次调用：仅取所需缓冲区大小
+    let _ = GetPrinterW(h, 2, None, &mut needed);
+    if needed == 0 {
+        return true; // 无法获取，保守视为在线
+    }
+    let mut buf: Vec<u8> = vec![0u8; needed as usize];
+    if GetPrinterW(h, 2, Some(buf.as_mut_slice()), &mut needed).is_err() {
+        return true;
+    }
+    let info = &*(buf.as_ptr() as *const PRINTER_INFO_2W);
+    let s = info.Status;
+    let attr = info.Attributes;
+    let offline = (s & PRINTER_STATUS_OFFLINE) != 0
+        || (s & PRINTER_STATUS_ERROR) != 0
+        || (s & PRINTER_STATUS_PAPER_OUT) != 0
+        || (s & PRINTER_STATUS_NOT_AVAILABLE) != 0
+        || (s & PRINTER_STATUS_NO_TONER) != 0
+        || (s & PRINTER_STATUS_DOOR_OPEN) != 0
+        || (s & PRINTER_STATUS_USER_INTERVENTION) != 0
+        || (attr & PRINTER_ATTRIBUTE_WORK_OFFLINE) != 0;
+    !offline
+}
+
+#[cfg(target_os = "windows")]
+unsafe fn pwstr_to_string(p: PWSTR) -> String {
+    if p.0.is_null() {
+        return String::new();
+    }
+    let mut len = 0usize;
+    while *p.0.add(len) != 0 {
+        len += 1;
+    }
+    let slice = std::slice::from_raw_parts(p.0, len);
+    String::from_utf16_lossy(slice)
+}
+
+#[derive(Serialize, Clone)]
+pub struct FileInfo {
+    pub name: String,
+    pub size: String,
+    pub ext: String,
+    pub path: String,
+}
+
+#[derive(Serialize, Clone)]
+pub struct PrinterStatusItem {
+    pub name: String,
+    pub online: bool,
+}
+
+#[tauri::command]
+#[cfg(target_os = "windows")]
+fn list_printers() -> Vec<String> {
+    // 原生 Win32 枚举，零进程、瞬时（替代 PowerShell Get-Printer）
+    cached_printers().into_iter().map(|(n, _)| n).collect()
+}
+
+#[tauri::command]
+#[cfg(not(target_os = "windows"))]
+fn list_printers() -> Vec<String> {
+    let output = match Command::new("lpstat").arg("-p").output() {
+        Ok(o) => o,
+        Err(_) => return vec![],
+    };
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut printers = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("printer ") {
+            if let Some(name) = rest.split_whitespace().next() {
+                printers.push(name.to_string());
+            }
+        }
+    }
+    printers
+}
+
+#[tauri::command]
+#[cfg(target_os = "windows")]
+fn get_default_printer() -> String {
+    // 原生 Win32 GetDefaultPrinterW，零进程、瞬时
+    use windows::Win32::Graphics::Printing::GetDefaultPrinterW;
+    use windows::core::PWSTR;
+    let mut buf = [0u16; 256];
+    let mut size: u32 = buf.len() as u32;
+    let r = unsafe { GetDefaultPrinterW(Some(PWSTR(buf.as_mut_ptr())), &mut size) };
+    if r.as_bool() {
+        let len = (size as usize).saturating_sub(1).min(buf.len());
+        String::from_utf16_lossy(&buf[..len])
+    } else {
+        String::new()
+    }
+}
+
+#[tauri::command]
+#[cfg(not(target_os = "windows"))]
+fn get_default_printer() -> String {
+    let output = match Command::new("lpstat").arg("-d").output() {
+        Ok(o) => o,
+        Err(_) => return String::new(),
+    };
+    let text = String::from_utf8_lossy(&output.stdout);
+    let s = text.trim();
+    if let Some(idx) = s.rfind(": ") {
+        return s[idx + 2..].trim().to_string();
+    }
+    String::new()
+}
+
+#[tauri::command]
+fn get_file_info(path: String) -> Result<FileInfo, String> {
+    let metadata = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+    let name = std::path::Path::new(&path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.clone());
+    let ext = std::path::Path::new(&path)
+        .extension()
+        .map(|e| e.to_string_lossy().to_uppercase())
+        .unwrap_or_else(|| "FILE".to_string());
+
+    let size = metadata.len();
+    let size_str = if size < 1024 {
+        format!("{} B", size)
+    } else if size < 1024 * 1024 {
+        format!("{:.1} KB", size as f64 / 1024.0)
+    } else {
+        format!("{:.2} MB", size as f64 / (1024.0 * 1024.0))
+    };
+
+    Ok(FileInfo {
+        name,
+        size: size_str,
+        ext,
+        path,
+    })
+}
+
+/// 统一打印管线：文件 -> PDF（第一层）-> 系统打印 API（第二层）。
+/// 全程不打开任何第三方应用窗口。
+#[tauri::command]
+async fn print_file(_app: tauri::AppHandle, path: String, printer_name: String) -> Result<String, String> {
+    info!(target: "print", "print_file: {} -> printer {:?}", path, printer_name);
+    let input = Path::new(&path);
+
+    // Windows 下图片走程序内置 GDI 直打（零依赖、静默）；失败再回退通用管线
+    #[cfg(target_os = "windows")]
+    {
+        let ext = input
+            .extension()
+            .map(|e| e.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        if matches!(
+            ext.as_str(),
+            "png" | "jpg" | "jpeg" | "gif" | "bmp" | "tif" | "tiff" | "webp"
+        ) {
+            if let Ok(msg) = printer::print_image(&app, input, &printer_name).await {
+                return Ok(msg);
+            }
+            // 内置直打失败，回退到 PDF + 外部打印
+        }
+
+        // Office 文档：优先用本机已装办公软件（WPS / Office）COM 自动化静默打印；
+        // 检测不到或打印失败则回退到下方 LibreOffice 通用管线
+        if matches!(
+            ext.as_str(),
+            "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx"
+        ) {
+            if let Ok(msg) = printer::print_office_via_com(input, &printer_name) {
+                return Ok(msg);
+            }
+        }
+    }
+
+    // macOS 下 Office 文档优先通过 AppleScript 调用 Microsoft Office 直接打印
+    // （零依赖、不弹窗），失败再回退到 LibreOffice 通用管线
+    #[cfg(target_os = "macos")]
+    {
+        let ext = input
+            .extension()
+            .map(|e| e.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        if matches!(
+            ext.as_str(),
+            "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx"
+        ) {
+            if let Ok(msg) = printer::macos::print_office_via_applescript(input) {
+                return Ok(msg);
+            }
+            // AppleScript 失败（如未装 Office），回退到下方 LibreOffice 通用管线
+        }
+    }
+
+    // 第一层：统一转换为 PDF（或原生可打印文件）
+    let printable = converter::to_pdf(input)
+        .map_err(|e| { error!(target: "print", "转换失败: {} ({})", e, path); e })?;
+
+    // 第二层：交给系统打印 API
+    printer::print_pdf(&printable, &printer_name)
+        .map_err(|e| { error!(target: "print", "打印失败: {} ({})", e, printer_name); e })
+}
+
+/// 本机是否可用 LibreOffice（Office 文档打印所需）。
+#[tauri::command]
+fn libreoffice_available() -> bool {
+    converter::office::libreoffice_available()
+}
+
+/// 本机是否可用办公软件自动化（Windows: COM / macOS: AppleScript），用于 Office 文档静默打印。
+/// 优先于 LibreOffice，无需额外下载安装。
+#[tauri::command]
+fn office_automation_available() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        let ok = printer::detect_office_com("docx").is_some();
+        log::info!(target: "office", "office_automation_available -> {}", ok);
+        ok
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let ok = printer::macos::macos_office_available();
+        log::info!(target: "office", "macos_office_available -> {}", ok);
+        ok
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        false
+    }
+}
+
+/// 仅把文件转换为 PDF 并输出到临时目录，返回 PDF 路径（不实际打印）。
+/// 用于没有打印机时预览生成的 PDF。
+#[tauri::command]
+fn build_pdf(path: String) -> Result<String, String> {
+    info!(target: "build", "build_pdf: {}", path);
+    converter::to_pdf(Path::new(&path))
+        .map(|p| p.to_string_lossy().to_string())
+        .map_err(|e| { error!(target: "build", "build_pdf 失败: {} ({})", e, path); e })
+}
+
+/// 该文件打印是否需要 LibreOffice。
+#[tauri::command]
+fn needs_libreoffice(path: String) -> bool {
+    converter::office::requires_libreoffice(Path::new(&path))
+}
+
+/// 用系统默认方式打开一个 URL（用于引导下载 LibreOffice）。
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg(&url)
+            .status()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("cmd")
+            .args(["/c", "start", "", &url])
+            .status()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        Command::new("xdg-open")
+            .arg(&url)
+            .status()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+}
+
+/// 返回当前运行平台："windows" | "macos" | "linux"，供前端区分窗口样式。
+#[tauri::command]
+fn platform() -> String {
+    #[cfg(target_os = "windows")]
+    {
+        "windows".to_string()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        "macos".to_string()
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        "linux".to_string()
+    }
+}
+
+/// 检测指定打印机是否在线/空闲。
+/// Windows：原生 Win32 枚举（零进程）；macOS/Linux：lpstat -p 包含 "is idle" / "is printing"。
+#[tauri::command]
+fn printer_online(name: String) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        cached_printers()
+            .into_iter()
+            .find(|(n, _)| n == &name)
+            .map(|(_, online)| online)
+            .unwrap_or(false)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let out = Command::new("lpstat")
+            .arg("-p")
+            .arg(&name)
+            .output()
+            .ok()
+            .and_then(|o| {
+                if o.status.success() {
+                    Some(String::from_utf8_lossy(&o.stdout).to_string())
+                } else {
+                    None
+                }
+            });
+        out.map_or(false, |s| {
+            s.contains("is idle") || s.contains("is printing")
+        })
+    }
+}
+
+/// 批量查询全部打印机的在线状态（Windows 原生枚举，零进程；macOS/Linux 用 lpstat）。
+#[tauri::command]
+fn printers_status() -> Vec<PrinterStatusItem> {
+    #[cfg(target_os = "windows")]
+    {
+        cached_printers()
+            .into_iter()
+            .map(|(name, online)| PrinterStatusItem { name, online })
+            .collect()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let output = Command::new("lpstat")
+            .arg("-p")
+            .output()
+            .ok()
+            .and_then(|o| if o.status.success() { Some(o.stdout) } else { None });
+        let output = match output {
+            Some(b) => String::from_utf8_lossy(&b).to_string(),
+            None => return vec![],
+        };
+        let mut statuses: Vec<PrinterStatusItem> = Vec::new();
+        for line in output.lines() {
+            let trimmed = line.trim();
+            if let Some(rest) = trimmed.strip_prefix("printer ") {
+                let parts: Vec<&str> = rest.splitn(2, ' ').collect();
+                if parts.len() >= 2 {
+                    let name = parts[0].to_string();
+                    let state = parts[1];
+                    let online = state.contains("is idle") || state.contains("is printing");
+                    statuses.push(PrinterStatusItem { name, online });
+                }
+            }
+        }
+        statuses
+    }
+}
+
+/// 读取已保存的语言偏好（"zh" 或 "en"），默认 "zh"。
+#[tauri::command]
+fn get_language(app: tauri::AppHandle) -> String {
+    load_lang(&app)
+}
+
+/// 前端（JavaScript）把日志/报错写入同一份日志文件，便于统一排查。
+/// level: "error" | "warn" | "info" | "debug" | "trace"
+#[tauri::command]
+fn log_message(level: String, msg: String) {
+    match level.as_str() {
+        "error" => error!(target: "frontend", "{}", msg),
+        "warn"  => log::warn!(target: "frontend", "{}", msg),
+        "debug" => log::debug!(target: "frontend", "{}", msg),
+        "trace" => log::trace!(target: "frontend", "{}", msg),
+        _       => info!(target: "frontend", "{}", msg),
+    }
+}
+
+// ── 语言偏好的持久化（存于应用配置目录的 lang.txt） ──────────
+fn lang_file_path(app: &tauri::AppHandle) -> Option<PathBuf> {
+    if let Ok(dir) = app.path().app_config_dir() {
+        let _ = std::fs::create_dir_all(&dir);
+        return Some(dir.join("lang.txt"));
+    }
+    None
+}
+
+fn load_lang(app: &tauri::AppHandle) -> String {
+    if let Some(p) = lang_file_path(app) {
+        if let Ok(s) = std::fs::read_to_string(&p) {
+            let s = s.trim().to_string();
+            if s == "en" || s == "zh" {
+                return s;
+            }
+        }
+    }
+    "zh".to_string()
+}
+
+fn save_lang(app: &tauri::AppHandle, lang: &str) {
+    if let Some(p) = lang_file_path(app) {
+        let _ = std::fs::write(&p, lang);
+    }
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_shell::init())
+        .invoke_handler(tauri::generate_handler![
+            list_printers,
+            get_default_printer,
+            get_file_info,
+            print_file,
+            libreoffice_available,
+            office_automation_available,
+            needs_libreoffice,
+            open_url,
+            build_pdf,
+            get_language,
+            log_message,
+            platform,
+            printer_online,
+            printers_status,
+        ])
+        .setup(|app| {
+            // 初始化文件日志（500KB 上限，超出自动截断旧内容）
+            crate::logger::init(app.handle());
+
+            // Windows 不使用 Overlay 标题栏（否则会多出一块深色标题区），改用原生标题栏
+            #[cfg(target_os = "windows")]
+            {
+                if let Some(win) = app.get_webview_window("main") {
+                    let _ = win.set_title_bar_style(tauri::TitleBarStyle::Visible);
+                }
+            }
+
+            // panic 钩子：把崩溃信息写入日志
+            std::panic::set_hook(Box::new(|info| {
+                let loc = info.location().map(|l| l.to_string()).unwrap_or_default();
+                error!(target: "panic", "线程 panic @ {}: {}", loc, info);
+            }));
+
+            info!(target: "app", "应用启动");
+            let handle = app.handle();
+            let lang = load_lang(handle);
+
+            // 语言子菜单：简体中文 / English
+            let lang_zh = CheckMenuItem::with_id(handle, "lang-zh", "简体中文", true, lang == "zh", None::<&str>)
+                .expect("failed to create lang-zh menu item");
+            let lang_en = CheckMenuItem::with_id(handle, "lang-en", "English", true, lang == "en", None::<&str>)
+                .expect("failed to create lang-en menu item");
+            let sub_label = if lang == "zh" { "语言" } else { "Language" };
+            let lang_menu = Submenu::with_id(handle, "lang-menu", sub_label, true)
+                .expect("failed to create lang submenu");
+            lang_menu
+                .append_items(&[&lang_zh, &lang_en])
+                .expect("failed to append lang menu items");
+
+            // 追加到默认原生菜单（App / File / Edit / View / Window / Help 之后）
+            match Menu::default(handle) {
+                Ok(menu) => {
+                    let _ = menu.append(&lang_menu);
+                    let _ = app.set_menu(menu);
+                }
+                Err(_) => {
+                    let menu = Menu::with_items(handle, &[&lang_menu])
+                        .expect("failed to create menu");
+                    let _ = app.set_menu(menu);
+                }
+            }
+
+            Ok(())
+        });
+
+    // 菜单选择语言 -> 持久化 + 通知前端动态切换
+    let builder = builder.on_menu_event(|app, event| {
+        let id = event.id().0.clone();
+        let lang = match id.as_str() {
+            "lang-zh" => "zh",
+            "lang-en" => "en",
+            _ => return,
+        };
+        save_lang(app, lang);
+
+        // 更新勾选状态（语言项位于 "lang-menu" 子菜单内，需从子菜单中查找）
+        if let Some(menu) = app.menu() {
+            if let Some(sub_item) = menu.get("lang-menu") {
+                if let Some(sub) = sub_item.as_submenu() {
+                    // 子菜单标题随语言变化
+                    let _ = sub.set_text(if lang == "zh" { "语言" } else { "Language" });
+                    if let Some(item) = sub.get("lang-zh") {
+                        if let Some(check) = item.as_check_menuitem() {
+                            let _ = check.set_checked(lang == "zh");
+                        }
+                    }
+                    if let Some(item) = sub.get("lang-en") {
+                        if let Some(check) = item.as_check_menuitem() {
+                            let _ = check.set_checked(lang == "en");
+                        }
+                    }
+                }
+            }
+        }
+
+        let _ = app.emit("language-changed", lang);
+    });
+
+    builder
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, _event| {});
+}

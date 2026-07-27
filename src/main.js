@@ -1,0 +1,865 @@
+import { invoke } from '@tauri-apps/api/core';
+import { open } from '@tauri-apps/plugin-dialog';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import { listen } from '@tauri-apps/api/event';
+import { t } from './i18n.js';
+
+// 打印按钮图标（语言切换时需要重建 innerHTML）
+const PRINT_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20">
+    <polyline points="6 9 6 2 18 2 18 9"/>
+    <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+    <rect x="6" y="14" width="12" height="8"/>
+  </svg>`;
+
+// ── 状态 ────────────────────────────────────────────
+const state = {
+  files: [],           // { id, path, name, size, ext, status, error }
+  printerName: '',
+  printers: [],
+  noPrinter: false,
+  printerOnline: null,   // true=在线绿 / false=离线红 / null=未知灰（由后台轮询写入）
+  printerStatuses: {},   // 各打印机在线状态记录：name -> true/false/null（后台轮询更新）
+  lang: 'zh',          // zh | en
+  printing: false,     // 正在打印中，禁止操作文件
+};
+
+// 文件自增 id（保证卡片增量渲染时的稳定标识）与卡片 DOM 映射
+let fileIdSeq = 0;
+const cardEls = new Map();
+
+// ── DOM 引用 ────────────────────────────────────────
+const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => document.querySelectorAll(sel);
+
+const emptyState   = $('#emptyState');
+const emptyDrop    = $('#emptyDropZone');
+const filePage     = $('#filePage');
+const dropZone     = $('#dropZone');
+const fileSection  = $('#fileSection');
+const fileCards    = $('#fileCards');
+const fileListTitle = $('#fileListTitle');
+const clearBtn     = $('#clearBtn');
+const bottomBar    = $('#bottomBar');
+const printerCard  = $('#printerCard');
+const printerTitle = $('#printerTitle');
+const printerDesc  = $('#printerDesc');
+const printerCaret = $('#printerCaret');
+const printerDot   = $('#printerDot');
+const printerPopup = $('#printerPopup');
+const printerPopupList = $('#printerPopupList');
+const printBtn     = $('#printBtn');
+const printBtnWrap = $('#printBtnWrap');
+const printBtnTooltip = $('#printBtnTooltip');
+const dragOverlay  = $('#dragOverlay');
+const loModal      = $('#loModal');
+const loModalMsg   = $('#loModalMsg');
+const loDownloadBtn = $('#loDownloadBtn');
+const loSkipBtn    = $('#loSkipBtn');
+const loCancelBtn  = $('#loCancelBtn');
+const titlebar     = $('#titlebar');
+
+// 标题栏拖动用（Overlay 样式下原生 data-tauri-drag-region 行为不稳定，
+// 这里显式调用系统 API 保证整条标题栏都可拖动，包含标题文字区域）
+titlebar.addEventListener('mousedown', (e) => {
+  // 左键才触发拖动，避免与右键菜单等冲突
+  if (e.button !== 0) return;
+  getCurrentWindow().startDragging();
+});
+
+// 全局前端错误 -> 写入 Rust 日志（与后端同一份日志文件，便于统一排查）
+function logFrontend(level, msg) {
+  invoke('log_message', { level, msg }).catch(() => {});
+}
+window.addEventListener('error', (e) => {
+  const msg = `${e.message} @ ${e.filename || ''}:${e.lineno || ''}:${e.colno || ''}`;
+  logFrontend('error', msg);
+});
+window.addEventListener('unhandledrejection', (e) => {
+  const r = e.reason;
+  const detail = r && (r.stack || r.message) ? (r.stack || r.message) : String(r);
+  logFrontend('error', `Unhandled rejection: ${detail}`);
+});
+
+// 文件列表事件委托：删除按钮 + 文件名悬停浮框（仅当被截断时显示完整名）
+let nameTipEl = null;
+function ensureNameTip() {
+  if (!nameTipEl) {
+    nameTipEl = document.createElement('div');
+    nameTipEl.className = 'name-tooltip';
+    nameTipEl.style.display = 'none';
+    document.body.appendChild(nameTipEl);
+  }
+  return nameTipEl;
+}
+fileCards.addEventListener('click', (e) => {
+  if (state.printing) return;
+  const btn = e.target.closest('.file-delete-btn');
+  if (btn) removeFileById(Number(btn.dataset.id));
+});
+fileCards.addEventListener('mouseover', (e) => {
+  const nameEl = e.target.closest('.file-name');
+  if (nameEl && nameEl.scrollWidth > nameEl.clientWidth + 1) {
+    const tip = ensureNameTip();
+    tip.textContent = nameEl.textContent;
+    tip.style.display = 'block';
+    const rect = nameEl.getBoundingClientRect();
+    const tw = tip.offsetWidth;
+    let left = rect.left + rect.width / 2 - tw / 2;
+    left = Math.max(8, Math.min(left, window.innerWidth - tw - 8));
+    tip.style.left = left + 'px';
+    tip.style.top = (rect.top - tip.offsetHeight - 8) + 'px';
+  }
+});
+fileCards.addEventListener('mouseout', (e) => {
+  if (e.target.closest('.file-name') && nameTipEl) nameTipEl.style.display = 'none';
+});
+
+// ── 初始化 ──────────────────────────────────────────
+async function init() {
+  // 平台相关：Windows 使用原生标题栏，隐藏自绘的深色标题栏
+  try {
+    const pf = await invoke('platform');
+    if (pf === 'windows') {
+      titlebar.style.display = 'none';
+    }
+  } catch (_) { /* 忽略 */ }
+
+  // 检测打印机
+  try {
+    state.printers = await invoke('list_printers');
+    const def = await invoke('get_default_printer');
+    state.printerName = def || '';
+  } catch (e) {
+    state.printers = [];
+    state.printerName = '';
+  }
+  state.noPrinter = state.printers.length === 0;
+  updatePrinterUI();
+  refreshStatuses();  // 启动时查一次打印机状态
+  showEmpty();
+
+  // 拖拽事件
+  setupDragDrop();
+
+  // 空状态点击
+  emptyDrop.addEventListener('click', selectFiles);
+  dropZone.addEventListener('click', selectFiles);
+
+  // 清空按钮
+  clearBtn.addEventListener('click', clearAll);
+
+  // 打印机卡片点击
+  printerCard.addEventListener('click', togglePrinterPopup);
+
+  // 打印按钮
+  printBtn.addEventListener('click', startPrint);
+
+  // dropzone 折叠：文件列表滚动时压缩/展开
+  fileSection.addEventListener('scroll', () => {
+    dropZone.classList.toggle('compact', fileSection.scrollTop > 20);
+  });
+
+  // 点击空白关闭弹出层
+  document.addEventListener('click', (e) => {
+    if (!printerPopup.contains(e.target) && !printerCard.contains(e.target)) {
+      closePrinterPopup();
+    }
+  });
+
+  // LibreOffice 提示弹窗按钮
+  loDownloadBtn.addEventListener('click', async () => {
+    try {
+      await invoke('open_url', { url: t('loDownloadUrl') });
+    } catch (_) { /* 忽略 */ }
+    closeLoModal('download');
+  });
+  loSkipBtn.addEventListener('click', () => closeLoModal('skip'));
+  loCancelBtn.addEventListener('click', () => closeLoModal('cancel'));
+
+  // 语言：启动时读取偏好，并监听原生菜单的语言切换事件
+  try {
+    state.lang = await invoke('get_language');
+  } catch (_) {
+    state.lang = 'zh';
+  }
+  applyLang(state.lang);
+  listen('language-changed', (e) => {
+    state.lang = e.payload;
+    applyLang(state.lang);
+  });
+
+  // 每 3 秒自动检测一次打印机在线状态（即使不操作也会刷新绿/红点）
+  setInterval(() => {
+    if (!state.noPrinter) refreshStatuses();
+  }, 3000);
+}
+
+// ── 国际化：根据语言刷新全部文案（含动态文本） ───────────
+function applyLang(lang) {
+  state.lang = lang;
+  window.__lang = lang;
+  document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+  document.title = t('appTitle');
+
+  // 静态文案（带 data-i18n 的元素）
+  document.querySelectorAll('[data-i18n]').forEach((el) => {
+    el.textContent = t(el.dataset.i18n);
+  });
+
+  // 动态文案
+  updatePrinterUI();
+  fileListTitle.textContent = t('fileList', { n: state.files.length });
+  if (state.files.length) renderFiles();
+}
+
+// ── 文件选择 ────────────────────────────────────────
+async function selectFiles() {
+  try {
+    const selected = await open({
+      multiple: true,
+      filters: [{
+        name: t('printFilter'),
+        extensions: [
+          'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
+          'jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'tif', 'webp',
+          'txt', 'rtf', 'csv'
+        ]
+      }]
+    });
+    if (!selected) return;
+
+    const paths = Array.isArray(selected) ? selected : [selected];
+    const supported = ['pdf','doc','docx','xls','xlsx','ppt','pptx',
+      'jpg','jpeg','png','gif','bmp','tiff','tif','webp','txt','rtf','csv'];
+    let added = 0, skipped = 0;
+    for (const p of paths) {
+      if (p && typeof p === 'string') {
+        const ext = (p.split('.').pop() || '').toLowerCase();
+        if (supported.includes(ext)) {
+          await addFile(p);
+          added++;
+        } else {
+          skipped++;
+        }
+      }
+    }
+    renderFiles();
+    if (added === 0 && skipped > 0) {
+      toast(t('unsupportedType'));
+    } else if (skipped > 0) {
+      toast(t('unsupportedSkipped', { n: skipped }));
+    }
+  } catch (e) {
+    toast(t('selectError') + e);
+  }
+}
+
+async function addFile(path) {
+  if (state.printing) return;
+  // 去重
+  if (state.files.some(f => f.path === path)) return;
+  try {
+    const info = await invoke('get_file_info', { path });
+    info.id = ++fileIdSeq;
+    info.status = 'pending'; // pending | ok | fail
+    info.error = '';
+    state.files.push(info);
+  } catch (e) {
+    // 忽略不支持的文件
+  }
+}
+
+function removeFileById(id) {
+  const idx = state.files.findIndex((f) => f.id === id);
+  if (idx >= 0) state.files.splice(idx, 1);
+  renderFiles();
+}
+
+function clearAll() {
+  if (state.printing) return;
+  state.files = [];
+  renderFiles();
+}
+
+// ── 渲染文件列表 ────────────────────────────────────
+function renderFiles() {
+  fileListTitle.textContent = t('fileList', { n: state.files.length });
+
+  if (state.files.length > 0) showFileList();
+  else showEmpty();
+
+  // 增量渲染：仅新文件播进场动画，已有文件仅更新状态（不重播）
+  // 倒序遍历，让最新添加的文件显示在列表最上方
+  const present = new Set();
+  for (let i = state.files.length - 1; i >= 0; i--) {
+    const f = state.files[i];
+    present.add(f.id);
+    let card = cardEls.get(f.id);
+    if (!card) {
+      card = createFileCard(f);
+      cardEls.set(f.id, card);
+      card.classList.add('file-card--enter');
+      card.addEventListener('animationend', () => card.classList.remove('file-card--enter'), { once: true });
+      fileCards.prepend(card); // 新卡片插入到最前面（倒序显示）
+    } else {
+      updateFileCard(card, f);
+      // 老卡片原位不动，避免打乱 DOM 顺序导致被删卡片跳到顶部
+    }
+  }
+  // 已移除的文件：仅对可视区的卡片播动画（不可见的不做无用功）
+  for (const [id, card] of cardEls) {
+    if (!present.has(id)) {
+      if (isCardVisible(card)) {
+        burstParticles(card, 180);
+        card.classList.add('file-card--exit');
+        card.addEventListener('animationend', () => collapseCard(id, card), { once: true });
+        setTimeout(() => collapseCard(id, card), 500);
+      } else {
+        // 不在可视区内直接清理，不浪费动画性能
+        card.remove();
+        cardEls.delete(id);
+      }
+    }
+  }
+
+  updateDropZoneAccept();
+  updatePrintBtnDisabledTip();
+}
+
+// 文件卡片 HTML 模板（create / update 共用）
+function cardTemplate(f) {
+  let statusHTML = '';
+  if (f.status === 'fail') {
+    statusHTML = `<span class="file-status-tag fail" title="${escHtml(f.error)}">${t('failTag')}</span>`;
+  } else if (f.status === 'printing') {
+    statusHTML = `<span class="file-status-tag printing"><span class="spinner"></span>${t('printing')}</span>`;
+  } else if (f.status === 'queued') {
+    statusHTML = `<span class="file-status-tag queued">${t('queuedTag')}</span>`;
+  }
+  return `
+    <div class="file-type-badge">${escHtml(f.ext)}</div>
+    <div class="file-info">
+      <span class="file-name">${escHtml(f.name)}</span>
+      <span class="file-size">${escHtml(f.size)}</span>
+    </div>
+    ${statusHTML}
+    <button class="file-delete-btn" data-id="${f.id}" type="button" title="${t('removeTitle')}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="3 6 5 6 21 6"/>
+        <path d="M19 6l-1 14H6L5 6"/>
+        <path d="M10 11v6M14 11v6"/>
+        <path d="M9 6V4h6v2"/>
+      </svg>
+    </button>`;
+}
+
+function createFileCard(f) {
+  const el = document.createElement('div');
+  el.className = 'file-card'
+    + (f.status === 'fail' ? ' failed' : '')
+    + (f.status === 'printing' ? ' printing' : '')
+    + (f.status === 'queued' ? ' queued' : '');
+  el.innerHTML = cardTemplate(f);
+  return el;
+}
+
+function updateFileCard(card, f) {
+  card.className = 'file-card'
+    + (f.status === 'fail' ? ' failed' : '')
+    + (f.status === 'printing' ? ' printing' : '')
+    + (f.status === 'queued' ? ' queued' : '');
+  card.innerHTML = cardTemplate(f);
+}
+
+// ── 卡片删除粒子爆散（Telegram 碎屑风格） ──────────────
+function burstParticles(card, count = 35) {
+  const rect = card.getBoundingClientRect();
+  const colors = ['#ff5f57','#febc2e','#28c840','#4b6bfb','#ff6b6b','#ffd93d','#6bcb77','#4d96ff','#e040fb'];
+
+  for (let i = 0; i < count; i++) {
+    const p = document.createElement('div');
+    p.className = 'particle';
+    // 在卡片矩形区域内随机取起始位置
+    const px = rect.left + Math.random() * rect.width;
+    const py = rect.top + Math.random() * rect.height;
+    const angle = Math.random() * 360;
+    const dist = 30 + Math.random() * 100;
+    const rad = angle * (Math.PI / 180);
+    const tx = Math.cos(rad) * dist;
+    const ty = Math.sin(rad) * dist;
+    const size = 3 + Math.random() * 4; // 小粒子
+    p.style.left = (px - size / 2) + 'px';
+    p.style.top = (py - size / 2) + 'px';
+    p.style.width = size + 'px';
+    p.style.height = size + 'px';
+    p.style.borderRadius = Math.random() > 0.5 ? '50%' : '2px';
+    p.style.background = colors[Math.floor(Math.random() * colors.length)];
+    document.body.appendChild(p);
+
+    // 从随机起始位置向随机方向飞散、旋转、缩小
+    p.animate([
+      { opacity: 1, transform: 'translate(0, 0) scale(1)' },
+      { opacity: 0, transform: `translate(${tx}px, ${ty}px) rotate(${angle * 2}deg) scale(0.15)` },
+    ], { duration: 750, easing: 'ease-out', fill: 'forwards' });
+
+    setTimeout(() => { if (p.parentNode) p.remove(); }, 1000);
+  }
+}
+
+// ── 卡片移除后塌缩空间，让下方文件平滑上移 ──────────
+function collapseCard(id, card) {
+  if (!card.isConnected || cardEls.get(id) !== card) return;
+
+  // 收集下方卡片，并记录它们此刻的屏幕位置（卡片尚未移除）
+  const downCards = [];
+  let sib = card.nextElementSibling;
+  while (sib && sib.classList.contains('file-card')) {
+    downCards.push(sib);
+    sib = sib.nextElementSibling;
+  }
+  const oldTops = downCards.map(c => c.getBoundingClientRect().top);
+
+  // 直接把卡片从布局中移除（下方卡片会瞬间上跳）
+  card.style.display = 'none';
+
+  // 用 getBoundingClientRect 测出下方卡片上跳后的新位置，计算差值
+  downCards.forEach((c, i) => {
+    const newTop = c.getBoundingClientRect().top;
+    const diff = oldTops[i] - newTop; // 差值 = 卡片高度 + 间隙
+    c.style.transform = `translateY(${diff}px)`;
+  });
+
+  // 强制重排使 transform 生效
+  downCards.forEach(c => void c.offsetHeight);
+
+  // 下一帧启动过渡：将 transform 归零 → 下方卡片从原位平滑上移
+  requestAnimationFrame(() => {
+    downCards.forEach(c => {
+      c.style.transition = 'transform 225ms ease-out';
+      c.style.transform = 'translateY(0)';
+    });
+  });
+
+  // 清理（守卫防止重复执行）
+  let cleaned = false;
+  const clean = () => {
+    if (cleaned) return;
+    cleaned = true;
+    downCards.forEach(c => { c.style.transition = ''; c.style.transform = ''; });
+    card.remove();
+    cardEls.delete(id);
+  };
+  if (downCards.length === 0) {
+    clean();
+    return;
+  }
+  downCards.forEach(c => c.addEventListener('transitionend', clean, { once: true }));
+  setTimeout(clean, 500);
+}
+
+// ── 可见性检测：只有可视区内的卡片才播删除动画 ─────
+function isCardVisible(card) {
+  const content = document.getElementById('content');
+  const cr = content.getBoundingClientRect();
+  const cardR = card.getBoundingClientRect();
+  return cardR.bottom > cr.top && cardR.top < cr.bottom;
+}
+
+// ── UI 状态切换（带过渡动画） ───────────────────────
+function showEmpty() {
+  emptyState.style.display = 'flex';
+
+  // 从文件列表退回空状态：空状态从上方滑入居中（与 showFileList 相反）
+  if (filePage.style.display !== 'none' && filePage.style.display !== '') {
+    emptyState.classList.add('is-hiding'); // 起始：上方 -36px、透明
+    filePage.classList.remove('is-showing');
+    setTimeout(() => {
+      filePage.style.display = 'none';
+      // 触发空状态向下滑入并淡出 → 居中
+      void emptyState.offsetWidth;
+      emptyState.classList.remove('is-hiding');
+    }, 300);
+  } else {
+    // 首次启动直接显示（无动画）
+    filePage.style.display = 'none';
+    emptyState.classList.remove('is-hiding');
+  }
+  bottomBar.style.display = 'flex';
+  printBtn.disabled = true;
+  updatePrintBtnDisabledTip();
+}
+
+function showFileList() {
+  // 空状态整体上移淡出
+  emptyState.classList.add('is-hiding');
+  setTimeout(() => { emptyState.style.display = 'none'; }, 300);
+  // 文件列表页从下方淡入
+  filePage.style.display = 'flex';
+  void filePage.offsetWidth; // 强制重排以触发过渡
+  filePage.classList.add('is-showing');
+  bottomBar.style.display = 'flex';
+  printBtn.disabled = state.noPrinter;
+  updatePrintBtnDisabledTip();
+}
+
+// 防止轮询与弹窗刷新重叠（离线打印机 OpenPrinter 可能较慢）
+let statusRefreshing = false;
+
+// ── 打印机在线检测（仅由后台定时轮询调用，点击不触发） ──
+// 拉取所有打印机最新状态，记录到 state.printerStatuses，并刷新底部圆点；
+// 若弹窗开着，也同步列表圆点（仍是后台行为，非点击触发）。
+async function refreshStatuses() {
+  if (statusRefreshing) return;
+  statusRefreshing = true;
+  try {
+    if (state.noPrinter) {
+      state.printerOnline = false;
+      updatePrinterUI();
+      return;
+    }
+    let all;
+    try {
+      all = await invoke('printers_status');
+    } catch (_) {
+      // 查询失败：保留已记录的状态，不盲目覆盖
+      return;
+    }
+    // 记录所有打印机的最新状态（后台持续更新）
+    const map = {};
+    for (const p of all) map[p.name] = p.online;
+    state.printerStatuses = map;
+    // 底部当前打印机圆点
+    state.printerOnline = map[state.printerName] ?? null;
+    updatePrinterUI();
+
+    // 弹窗开着时同步刷新列表圆点（后台行为）
+    if (printerPopup.style.display !== 'block') return;
+    printerPopupList.querySelectorAll('.printer-popup-item').forEach(item => {
+      const name = item.dataset.printer;
+      const dot = item.querySelector('.printer-popup-dot');
+      if (!dot) return;
+      const online = map[name];
+      dot.className = 'printer-popup-dot' + (online === true ? ' online' : online === false ? ' offline' : '');
+    });
+  } finally {
+    statusRefreshing = false;
+  }
+}
+
+// ── 打印机 UI ───────────────────────────────────────
+function updatePrinterUI() {
+  if (state.noPrinter) {
+    printerTitle.textContent = t('noPrinter');
+    printerDesc.textContent = t('noPrinterDesc');
+    printerCaret.style.display = 'none';
+    printerDot.style.display = 'none';
+    printerCard.classList.add('no-printer');
+    printerCard.title = '';
+  } else {
+    printerTitle.textContent = t('printerPrefix');
+    printerDesc.textContent = state.printerName;
+    printerDesc.title = state.printerName;
+    printerCaret.style.display = 'block';
+    printerCard.classList.remove('no-printer');
+    printerDot.style.display = '';
+    printerDot.className = 'printer-status-dot'
+      + (state.printerOnline === true ? ' online' : state.printerOnline === false ? ' offline' : '');
+  }
+  updatePrintBtnDisabledTip();
+}
+
+function togglePrinterPopup() {
+  if (state.noPrinter) {
+    openSystemPrinterSettings();
+    return;
+  }
+  if (printerPopup.style.display === 'block') {
+    closePrinterPopup();
+    return;
+  }
+  const printers = state.printers;
+  if (printers.length <= 1) {
+    toast(t('noOtherPrinter'));
+    return;
+  }
+
+  // 直接展示后台已记录的状态（点击不触发刷新）
+  printerPopupList.innerHTML = printers.map(p => {
+    const online = state.printerStatuses[p];
+    const dotCls = online === true ? ' online' : online === false ? ' offline' : '';
+    return `
+    <div class="printer-popup-item${p === state.printerName ? ' active' : ''}" data-printer="${escHtml(p)}">
+      <span class="printer-popup-dot${dotCls}"></span>
+      ${escHtml(p)}
+    </div>`;
+  }).join('');
+  printerPopup.style.display = 'block';
+  printerCard.classList.add('open');
+
+  printerPopupList.querySelectorAll('.printer-popup-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const name = item.dataset.printer;
+      state.printerName = name;
+      // 仅切换到已记录的状态展示，不触发刷新
+      state.printerOnline = state.printerStatuses[name] ?? null;
+      closePrinterPopup();              // 纯同步，无异步
+      updatePrinterUI();
+      toast(t('selected') + name);
+    });
+  });
+  // 注意：不在这里调用 refreshStatuses，状态完全由后台定时轮询负责
+}
+
+function closePrinterPopup() {
+  printerPopup.style.display = 'none';
+  printerCard.classList.remove('open');
+}
+
+// ── 打印按钮禁用提示 ───────────────────────────────
+// 在打印按钮禁用时，鼠标悬浮显示不能打印的原因。
+function updatePrintBtnDisabledTip() {
+  let tip = '';
+  if (state.noPrinter) {
+    tip = t('noPrinter');
+  } else if (state.files.length === 0) {
+    tip = t('pleaseSelect');
+  } else if (state.printing) {
+    tip = t('printing');
+  }
+  printBtnTooltip.textContent = tip;
+}
+
+// 鼠标悬浮打印按钮时显示 tooltip
+printBtn.addEventListener('mouseenter', () => {
+  if (printBtn.disabled && printBtnTooltip.textContent) {
+    printBtnTooltip.classList.add('show');
+  }
+});
+printBtn.addEventListener('mouseleave', () => {
+  printBtnTooltip.classList.remove('show');
+});
+
+// ── 打开系统「打印机与扫描仪」设置 ──────────────────
+function openSystemPrinterSettings() {
+  try {
+    invoke('open_url', { url: 'x-apple.systempreferences:com.apple.Print-Scan-Settings.extension' });
+  } catch (_) {
+    try { invoke('open_url', { url: 'x-apple.systempreferences:' }); } catch (_) { /* 忽略 */ }
+  }
+  toast(t('noPrinterOpenSettings'));
+}
+
+// ── LibreOffice 提示弹窗 ─────────────────────────────
+let loResolve = null;
+
+function showLibreOfficePrompt(count) {
+  loModalMsg.textContent = t('loPrompt', { n: count });
+  loModal.style.display = 'flex';
+  return new Promise((resolve) => { loResolve = resolve; });
+}
+
+function closeLoModal(result) {
+  loModal.style.display = 'none';
+  if (loResolve) {
+    loResolve(result);
+    loResolve = null;
+  }
+}
+
+// ── 打印 ────────────────────────────────────────────
+async function startPrint() {
+  if (state.files.length === 0) {
+    toast(t('pleaseSelect'));
+    return;
+  }
+
+  // 无打印机：直接打开系统「打印机与扫描仪」设置
+  if (state.noPrinter) {
+    openSystemPrinterSettings();
+    return;
+  }
+
+  // 本机是否有可用的办公软件 COM 自动化（WPS / Office）。
+  // 有的话 Office 文档可静默打印，无需 LibreOffice。
+  const officeAvailable = await invoke('office_automation_available');
+
+  // 找出需要 LibreOffice 的文件（有办公软件自动化则不算）
+  const needLo = [];
+  for (const f of state.files) {
+    if ((await invoke('needs_libreoffice', { path: f.path })) && !officeAvailable) needLo.push(f);
+  }
+
+  // 有需要时但本机未安装 -> 提示下载或跳过
+  let filesToPrint = state.files;
+  if (needLo.length > 0) {
+    const available = await invoke('libreoffice_available');
+    if (!available) {
+      const action = await showLibreOfficePrompt(needLo.length);
+      if (action === 'download') {
+        toast(t('loOpened'));
+        return;
+      }
+      if (action === 'cancel') {
+        return;
+      }
+      // skip：仅打印无需 LibreOffice 的文件
+      filesToPrint = state.files.filter((f) => !needLo.includes(f));
+      if (filesToPrint.length === 0) {
+        toast(t('skippedAll'));
+        return;
+      }
+      toast(t('skippedN', { n: needLo.length }));
+    }
+  }
+
+  // ── 开始打印 ──────────────────────────────────────
+  state.printing = true;
+  printBtn.disabled = true;
+  printBtn.textContent = t('printing');
+  clearBtn.disabled = true;
+  fileCards.classList.add('printing');
+
+  // 所有待打印文件先标记为"排队"
+  for (const f of filesToPrint) {
+    f.status = 'queued';
+    const card = cardEls.get(f.id);
+    if (card) updateFileCard(card, f);
+  }
+
+  // 拍快照：避免迭代中 splice 导致跳项
+  let ok = 0, fail = 0;
+  for (const f of [...filesToPrint]) {
+    // 文件可能被外部删除（比如在 LO 提示后），跳过
+    const realFile = state.files.find(r => r.id === f.id);
+    if (!realFile) continue;
+
+    // 切到"打印中"
+    realFile.status = 'printing';
+    const card = cardEls.get(realFile.id);
+    if (card) updateFileCard(card, realFile);
+
+    try {
+      await invoke('print_file', { path: realFile.path, printerName: state.printerName });
+
+      // 打印成功：爆散粒子 + 退场动画 + 塌缩
+      ok++;
+      const idx = state.files.indexOf(realFile);
+      if (idx >= 0) state.files.splice(idx, 1);
+
+      const cardToRemove = cardEls.get(realFile.id);
+      if (cardToRemove && cardToRemove.isConnected) {
+        cardToRemove.classList.add('file-card--exit');
+        if (isCardVisible(cardToRemove)) burstParticles(cardToRemove, 180);
+        const onDone = () => {
+          cardToRemove.removeEventListener('animationend', onDone);
+          collapseCard(realFile.id, cardToRemove);
+        };
+        cardToRemove.addEventListener('animationend', onDone, { once: true });
+        setTimeout(() => {
+          if (cardToRemove.isConnected) collapseCard(realFile.id, cardToRemove);
+        }, 600);
+      }
+    } catch (e) {
+      // 打印失败：标记失败，保留在列表
+      fail++;
+      realFile.status = 'fail';
+      const errMsg = String(e && e.message ? e.message : e);
+      realFile.error = errMsg;
+      logFrontend('error', `打印失败 [${realFile.name}]: ${errMsg}`);
+
+      const failCard = cardEls.get(realFile.id);
+      if (failCard) updateFileCard(failCard, realFile);
+    }
+
+    await sleep(300);
+  }
+
+  // ── 结束，恢复 UI ──────────────────────────────────
+  state.printing = false;
+  clearBtn.disabled = false;
+  fileCards.classList.remove('printing');
+
+  // 同步渲染，修复 cardEls 中可能残留的已删除项
+  renderFiles();
+
+  const msg = fail === 0
+    ? t('sentN', { n: ok, printer: state.printerName || t('defaultPrinter') })
+    : t('resultOkFail', { ok, fail });
+  toast(msg);
+
+  printBtn.disabled = false;
+  printBtn.innerHTML = `${PRINT_SVG}<span data-i18n="printBtn">${t('printBtn')}</span>`;
+}
+
+// ── 拖拽 ────────────────────────────────────────────
+function setupDragDrop() {
+  const appWindow = getCurrentWindow();
+
+  appWindow.onDragDropEvent((event) => {
+    const { type, paths } = event.payload;
+
+    if (type === 'enter' || type === 'over') {
+      dragOverlay.style.display = 'flex';
+    } else if (type === 'drop') {
+      dragOverlay.style.display = 'none';
+      if (paths && paths.length) {
+        const supported = ['pdf','doc','docx','xls','xlsx','ppt','pptx',
+          'jpg','jpeg','png','gif','bmp','tiff','tif','webp','txt','rtf','csv'];
+        let added = 0, unsupported = 0;
+        (async () => {
+          for (const p of paths) {
+            const ext = (p.split('.').pop() || '').toLowerCase();
+            if (supported.includes(ext)) {
+              await addFile(p);
+              added++;
+            } else {
+              unsupported++;
+            }
+          }
+          renderFiles();
+          if (added === 0 && unsupported > 0) {
+            toast(t('unsupportedType'));
+          } else if (unsupported > 0) {
+            toast(t('unsupportedSkipped', { n: unsupported }));
+          }
+        })();
+      }
+    } else {
+      dragOverlay.style.display = 'none';
+    }
+  });
+
+  // HTML5 dragover/highlight for drop zones
+  [emptyDrop, dropZone].forEach(zone => {
+    zone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      zone.classList.add('drag-over');
+    });
+    zone.addEventListener('dragleave', () => {
+      zone.classList.remove('drag-over');
+    });
+  });
+}
+
+// 拖拽区接受的文件类型（暂无特殊处理，Tauri 处理）
+function updateDropZoneAccept() {}
+
+// ── 工具 ────────────────────────────────────────────
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
+
+function toast(msg) {
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 3000);
+}
+
+// ── 启动 ────────────────────────────────────────────
+init();
