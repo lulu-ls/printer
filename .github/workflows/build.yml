@@ -8,14 +8,9 @@ on:
     branches: [main]
 
 jobs:
-  # ── macOS ──────────────────────────────────────────
-  macos:
-    strategy:
-      matrix:
-        target:
-          - aarch64-apple-darwin
-          - x86_64-apple-darwin
-    runs-on: ${{ matrix.target == 'aarch64-apple-darwin' && 'macos-latest' || 'macos-13' }}
+  # ── macOS ARM64 ────────────────────────────────────
+  macos-arm64:
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -28,26 +23,69 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: aarch64-apple-darwin
 
       - name: Install npm deps
         run: npm ci
 
-      - name: Build (${{ matrix.target }})
-        run: npm run tauri build -- --target ${{ matrix.target }}
+      - name: Build
+        run: npm run tauri build -- --target aarch64-apple-darwin
 
       - name: Upload .dmg
         uses: actions/upload-artifact@v4
         with:
-          name: Printer-Assistant-${{ matrix.target == 'aarch64-apple-darwin' && 'ARM64' || 'x86_64' }}
-          path: src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.dmg
+          name: Printer-Assistant-ARM64
+          path: src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.dmg
           if-no-files-found: error
 
-      - name: Upload binary for universal merge
+      - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
-          name: binary-${{ matrix.target }}
-          path: src-tauri/target/${{ matrix.target }}/release/printer-assistant
+          name: binary-aarch64-apple-darwin
+          path: src-tauri/target/aarch64-apple-darwin/release/printer-assistant
+          if-no-files-found: error
+
+  # ── macOS x86_64 ───────────────────────────────────
+  macos-x86:
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin
+
+      - name: Install npm deps
+        run: npm ci
+
+      - name: Build
+        run: npm run tauri build -- --target x86_64-apple-darwin
+
+      - name: Upload .dmg
+        uses: actions/upload-artifact@v4
+        with:
+          name: Printer-Assistant-x86_64
+          path: src-tauri/target/x86_64-apple-darwin/release/bundle/macos/*.dmg
+          if-no-files-found: error
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-x86_64-apple-darwin
+          path: src-tauri/target/x86_64-apple-darwin/release/printer-assistant
+          if-no-files-found: error
+
+  # ── Universal Binary ───────────────────────────────
+  universal:
+    needs: [macos-arm64, macos-x86]
+    runs-on: macos-latest
           if-no-files-found: error
 
   # ── Universal Binary（合并两个架构） ──────────────
@@ -116,7 +154,7 @@ jobs:
   # ── Release（打 tag 时自动发布） ──────────────────
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [macos, windows, universal]
+    needs: [macos-arm64, macos-x86, windows, universal]
     runs-on: ubuntu-latest
     steps:
       - name: Download macOS ARM64
