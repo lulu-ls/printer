@@ -154,10 +154,35 @@ async function init() {
   // 打印按钮
   printBtn.addEventListener('click', startPrint);
 
-  // dropzone 折叠：文件列表滚动时压缩/展开
+  // dropzone 折叠：用 hysteresis（迟滞）避免临界抖动
+  // 一旦折叠，只有回到顶部附近才展开；展开后只有超过阈值才折叠
+  let dropzoneRafId = null;
+  let dropzoneCollapsed = false;
   fileSection.addEventListener('scroll', () => {
-    dropZone.classList.toggle('compact', fileSection.scrollTop > 20);
-  });
+    if (dropzoneRafId) return;
+    dropzoneRafId = requestAnimationFrame(() => {
+      dropzoneRafId = null;
+      const canScroll = fileSection.scrollHeight > fileSection.clientHeight;
+      if (!canScroll) {
+        dropZone.classList.remove('compact');
+        dropzoneCollapsed = false;
+        return;
+      }
+      if (dropzoneCollapsed) {
+        // 已折叠：只有回到顶部才展开
+        if (fileSection.scrollTop <= 5) {
+          dropZone.classList.remove('compact');
+          dropzoneCollapsed = false;
+        }
+      } else {
+        // 未折叠：超过阈值才折叠
+        if (fileSection.scrollTop > 40) {
+          dropZone.classList.add('compact');
+          dropzoneCollapsed = true;
+        }
+      }
+    });
+  }, { passive: true });
 
   // 点击空白关闭弹出层
   document.addEventListener('click', (e) => {

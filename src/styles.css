@@ -127,7 +127,7 @@ body {
 .file-page {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 8px;
   flex: 1;
   min-height: 0;
 }
@@ -158,9 +158,10 @@ body {
 .dropzone.compact {
   height: 52px;
   flex-direction: row;
-  gap: 10px;
+  gap: 14px;
   border-radius: 14px;
-  padding: 0 16px;
+  padding: 0 30px;
+  justify-content: flex-start;
 }
 
 .dropzone:hover,
@@ -186,8 +187,8 @@ body {
   transition: width 0.3s ease, height 0.3s ease, font-size 0.3s ease;
 }
 .dropzone.compact .add-icon {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   font-size: 20px;
 }
 
@@ -245,6 +246,11 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 9;
+  background: #f5f5f7;
+  padding: 4px 0;
 }
 
 .file-list-title {
