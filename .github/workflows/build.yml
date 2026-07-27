@@ -35,8 +35,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Printer-Assistant-ARM64
-          path: src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.dmg
-          if-no-files-found: error
+          path: |
+            src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app
 
       - name: Upload binary
         uses: actions/upload-artifact@v4
@@ -72,8 +73,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Printer-Assistant-x86_64
-          path: src-tauri/target/x86_64-apple-darwin/release/bundle/macos/*.dmg
-          if-no-files-found: error
+          path: |
+            src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
+            src-tauri/target/x86_64-apple-darwin/release/bundle/macos/*.app
 
       - name: Upload binary
         uses: actions/upload-artifact@v4
