@@ -23,6 +23,9 @@ const state = {
   printing: false,     // 正在打印中，禁止操作文件
 };
 
+// Demo 模式（URL hash #demo）：伪造打印机 + 模拟打印成功，便于录演示视频
+const isDemo = window.location.hash === '#demo';
+
 // 文件自增 id（保证卡片增量渲染时的稳定标识）与卡片 DOM 映射
 let fileIdSeq = 0;
 const cardEls = new Map();
@@ -126,9 +129,14 @@ async function init() {
 
   // 检测打印机
   try {
-    state.printers = await invoke('list_printers');
-    const def = await invoke('get_default_printer');
-    state.printerName = def || '';
+    if (isDemo) {
+      state.printers = ['Demo Printer (HP LaserJet)'];
+      state.printerName = 'Demo Printer (HP LaserJet)';
+    } else {
+      state.printers = await invoke('list_printers');
+      const def = await invoke('get_default_printer');
+      state.printerName = def || '';
+    }
   } catch (e) {
     state.printers = [];
     state.printerName = '';
@@ -541,6 +549,8 @@ let statusRefreshing = false;
 // 若弹窗开着，也同步列表圆点（仍是后台行为，非点击触发）。
 async function refreshStatuses() {
   if (statusRefreshing) return;
+  // Demo 模式不检测真实打印机（伪造的一直在线）
+  if (isDemo) { statusRefreshing = false; return; }
   statusRefreshing = true;
   try {
     if (state.noPrinter) {
@@ -707,6 +717,28 @@ async function startPrint() {
   // 无打印机：直接打开系统「打印机与扫描仪」设置
   if (state.noPrinter) {
     openSystemPrinterSettings();
+    return;
+  }
+
+  // Demo 模式：不实际打印，模拟成功
+  if (isDemo) {
+    state.printing = true;
+    printBtn.disabled = true;
+    printBtn.textContent = t('printing');
+    let ok = 0;
+    for (const f of state.files) {
+      f.status = 'ok';
+      f.error = '';
+      ok++;
+      await sleep(300);
+    }
+    state.printing = false;
+    state.files = state.files.filter((f) => f.status !== 'ok');
+    renderFiles();
+    printBtn.disabled = false;
+    printBtn.innerHTML = `${PRINT_SVG}<span data-i18n="printBtn">${t('printBtn')}</span>`;
+    const msg = t('sentN', { n: ok, printer: state.printerName || t('defaultPrinter') });
+    toast(msg);
     return;
   }
 
