@@ -17,18 +17,6 @@
 - **跨平台**：macOS（CUPS `lp`）、Windows（MuPDF `mutool`）
 - **多语言**：中文 / English，原生菜单切换
 
-## 技术栈
-
-| 层 | 技术 |
-|---|---|
-| 桌面框架 | [Tauri 2](https://v2.tauri.app/)（Rust 后端 + 系统 WebView） |
-| 前端 | 原生 JavaScript + [Vite 6](https://vitejs.dev/) |
-| 后端 | Rust（打印管线、文件转换、系统调用） |
-| 打印（macOS） | CUPS `lp` / `lpstat` + AppleScript（Microsoft Office） |
-| 打印（Windows） | MuPDF `mutool draw -o printer:<name>` |
-| Office 转 PDF | LibreOffice `soffice --headless --convert-to pdf` |
-| 图片处理（macOS） | 系统 `sips` 转 JPEG |
-
 ## 快速开始
 
 ```bash
@@ -44,6 +32,17 @@ npm run tauri build
 
 依赖：Node.js 18+、Rust 工具链、macOS 需 Xcode CLI（`xcode-select --install`）。
 
+## 技术栈
+
+| 层 | 技术 |
+|---|---|
+| 桌面框架 | [Tauri 2](https://v2.tauri.app/)（Rust 后端 + 系统 WebView） |
+| 前端 | 原生 JavaScript + [Vite 6](https://vitejs.dev/) |
+| 后端 | Rust（打印管线、文件转换、系统调用） |
+| 打印（macOS） | CUPS `lp` / `lpstat` + AppleScript（Microsoft Office） |
+| 打印（Windows） | MuPDF `mutool draw -o printer:<name>` |
+| Office 转 PDF | LibreOffice `soffice --headless --convert-to pdf` |
+| 图片处理（macOS） | 系统 `sips` 转 JPEG |
 
 ## 环境依赖
 
