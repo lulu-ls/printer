@@ -36,7 +36,6 @@ jobs:
           name: Printer-Assistant-ARM64
           path: |
             src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
-            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app
 
       - name: Upload binary
         uses: actions/upload-artifact@v4
@@ -73,7 +72,6 @@ jobs:
           name: Printer-Assistant-x86_64
           path: |
             src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
-            src-tauri/target/x86_64-apple-darwin/release/bundle/macos/*.app
 
       - name: Upload binary
         uses: actions/upload-artifact@v4
@@ -179,5 +177,8 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2.2.1
         with:
-          files: release/**
+          files: |
+            release/*.dmg
+            release/*.exe
+            release/printer-assistant
           generate_release_notes: true
