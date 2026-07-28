@@ -5,6 +5,10 @@
 如果帮助到你，欢迎点个 star 
 ---
 
+## 演示
+<img width="800" height="450" alt="demo-ezgif com-video-to-gif-converter" src="https://github.com/user-attachments/assets/3d6d7f43-773c-4972-b2f3-cf44c6c7cee7" />
+
+
 ## 截图
 <img width="1116" height="736" alt="image" src="https://github.com/user-attachments/assets/27c0a4ab-7a20-4f7e-84b6-9c7d48a27002" />
 
