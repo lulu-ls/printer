@@ -6,7 +6,8 @@
 ---
 
 ## 截图
-<img width="1101" height="770" alt="image" src="https://github.com/user-attachments/assets/fa62833a-cea7-4a97-ad65-c15108616e47" />
+<img width="1116" height="736" alt="image" src="https://github.com/user-attachments/assets/27c0a4ab-7a20-4f7e-84b6-9c7d48a27002" />
+
 
 ## 核心特性
 
