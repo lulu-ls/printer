@@ -23,8 +23,8 @@ const state = {
   printing: false,     // 正在打印中，禁止操作文件
 };
 
-// Demo 模式（URL hash #demo）：伪造打印机 + 模拟打印成功，便于录演示视频
-const isDemo = window.location.hash === '#demo';
+// Demo 模式（环境变量 DEMO=true）：伪造打印机 + 模拟打印成功，便于录演示视频
+let isDemo = false;
 
 // 文件自增 id（保证卡片增量渲染时的稳定标识）与卡片 DOM 映射
 let fileIdSeq = 0;
@@ -126,6 +126,9 @@ async function init() {
       titlebar.style.display = 'none';
     }
   } catch (_) { /* 忽略 */ }
+
+  // Demo 模式（环境变量 DEMO=true，无需真实打印机即可录屏）
+  try { isDemo = await invoke('is_demo'); } catch (_) { isDemo = false; }
 
   // 检测打印机
   try {

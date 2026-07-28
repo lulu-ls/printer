@@ -516,6 +516,12 @@ fn log_message(level: String, msg: String) {
     }
 }
 
+/// 是否启用 Demo 模式（环境变量 DEMO=true，用于录演示视频）。
+#[tauri::command]
+fn is_demo() -> bool {
+    std::env::var("DEMO").map(|v| v == "1" || v == "true").unwrap_or(false)
+}
+
 // ── 语言偏好的持久化（存于应用配置目录的 lang.txt） ──────────
 fn lang_file_path(app: &tauri::AppHandle) -> Option<PathBuf> {
     if let Ok(dir) = app.path().app_config_dir() {
@@ -563,6 +569,7 @@ pub fn run() {
             platform,
             printer_online,
             printers_status,
+            is_demo,
         ])
         .setup(|app| {
             // 初始化文件日志（500KB 上限，超出自动截断旧内容）
