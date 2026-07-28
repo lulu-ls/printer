@@ -26,6 +26,11 @@
   "bundle": {
     "active": true,
     "targets": ["app", "dmg"],
+    "file_name_template": "PrinterAssistant_{version}_{arch}",
+    "macOS": {
+      "minimumSystemVersion": "11.0",
+      "signingIdentity": "-"
+    },
     "icon": [
       "icons/icon_16x16.png",
       "icons/icon_16x16@2x.png",
