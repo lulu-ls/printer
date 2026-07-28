@@ -45,9 +45,9 @@ jobs:
           path: src-tauri/target/aarch64-apple-darwin/release/printer-assistant
           if-no-files-found: error
 
-  # ── macOS x86_64 ───────────────────────────────────
+  # ── macOS x86_64（ARM runner 交叉编译，避免排队 macos-13） ──
   macos-x86:
-    runs-on: macos-13
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
