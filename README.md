@@ -8,16 +8,6 @@
 ## 截图
 <img width="1116" height="736" alt="image" src="https://github.com/user-attachments/assets/27c0a4ab-7a20-4f7e-84b6-9c7d48a27002" />
 
-
-## 核心特性
-
-- **拖拽即打**：拖入文件或点击选择，支持 PDF、Office（doc/docx/xls/xlsx/ppt/pptx）、图片（png/jpg/gif/bmp/webp/tiff）、纯文本
-- **智能转换管线**：文件自动转为 PDF 后送打印机，全程无需打开第三方软件
-- **自动回退**：macOS 优先用 Microsoft Office（AppleScript）静默打印 Office 文档，未安装时自动回退 LibreOffice
-- **打印机管理**：自动检测本机打印机、在线状态、默认打印机，弹窗切换
-- **跨平台**：macOS（CUPS `lp`）、Windows（MuPDF `mutool`）
-- **多语言**：中文 / English，原生菜单切换
-
 ## 快速开始
 
 ```bash
@@ -32,6 +22,15 @@ npm run tauri build
 ```
 
 依赖：Node.js 18+、Rust 工具链、macOS 需 Xcode CLI（`xcode-select --install`）。
+
+## 核心特性
+
+- **拖拽即打**：拖入文件或点击选择，支持 PDF、Office（doc/docx/xls/xlsx/ppt/pptx）、图片（png/jpg/gif/bmp/webp/tiff）、纯文本
+- **智能转换管线**：文件自动转为 PDF 后送打印机，全程无需打开第三方软件
+- **自动回退**：macOS 优先用 Microsoft Office（AppleScript）静默打印 Office 文档，未安装时自动回退 LibreOffice
+- **打印机管理**：自动检测本机打印机、在线状态、默认打印机，弹窗切换
+- **跨平台**：macOS（CUPS `lp`）、Windows（MuPDF `mutool`）
+- **多语言**：中文 / English，原生菜单切换
 
 ## 技术栈
 
