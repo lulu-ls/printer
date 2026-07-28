@@ -90,13 +90,13 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Download arm64 binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v4.2.1
         with:
           name: binary-aarch64-apple-darwin
           path: bin/arm64
 
       - name: Download x86_64 binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v4.2.1
         with:
           name: binary-x86_64-apple-darwin
           path: bin/x86
@@ -149,33 +149,35 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [macos-arm64, macos-x86, windows, universal]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # 创建 Release 需要写入权限
     steps:
       - name: Download macOS ARM64
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v4.2.1
         with:
           name: Printer-Assistant-ARM64
           path: release
 
       - name: Download macOS x86_64
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v4.2.1
         with:
           name: Printer-Assistant-x86_64
           path: release
 
       - name: Download Windows
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v4.2.1
         with:
           name: Printer-Assistant-Windows
           path: release
 
       - name: Download Universal Binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v4.2.1
         with:
           name: Printer-Assistant-Universal
           path: release
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v2.2.1
         with:
           files: release/**
           generate_release_notes: true
