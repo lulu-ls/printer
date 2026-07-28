@@ -855,7 +855,7 @@ body {
    ===================================================== */
 .footer {
   position: absolute;
-  bottom: 6px;
+  bottom: 12px;
   left: 50%;
   transform: translateX(-50%);
   display: inline-flex;
@@ -865,15 +865,52 @@ body {
   color: #b0b0c0;
   text-decoration: none;
   cursor: pointer;
-  opacity: 0.5;
+  opacity: 0.55;
   transition: opacity 0.2s, color 0.2s;
   z-index: 1;
   white-space: nowrap;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+.footer::before {
+  content: '';
+  position: absolute;
+  top: -8px;
+  left: -4px;
+  right: -4px;
+  height: 1px;
+  background: linear-gradient(to right, transparent, #d0d0e0 20%, #d0d0e0 80%, transparent);
+  opacity: 0;
+  transition: opacity 0.25s;
 }
 .footer:hover {
   opacity: 1;
   color: #7070c8;
 }
+.footer:hover::before {
+  opacity: 0.6;
+}
 .footer svg {
   flex-shrink: 0;
+}
+/* CSS 悬浮提示（无延迟，快于原生 title） */
+.footer::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(36,36,48,0.92);
+  color: #fff;
+  font-size: 11.5px;
+  padding: 5px 11px;
+  border-radius: 7px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+  backdrop-filter: blur(4px);
+}
+.footer:hover::after {
+  opacity: 1;
 }
