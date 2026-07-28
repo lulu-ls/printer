@@ -15,6 +15,7 @@ use std::ffi::OsString;
 #[allow(unused_imports)]
 use tauri::AppHandle;
 
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub fn print_via_mutool(path: &Path, printer: &str) -> Result<String, String> {
     let abs = std::fs::canonicalize(path).map_err(|e| e.to_string())?;
     let path_str = abs.to_string_lossy().to_string();
@@ -37,6 +38,7 @@ pub fn print_via_mutool(path: &Path, printer: &str) -> Result<String, String> {
 }
 
 /// 检测本机是否安装了办公软件的 COM 自动化接口（WPS / Office）。
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub fn detect_office_com(_extension: &str) -> Option<String> {
     // 尝试检测 WPS 或 Microsoft Office 的 COM 注册
     // 简单检测：查看注册表中是否有对应 ProgID
@@ -76,6 +78,7 @@ fn check_com_progid(_prog_id: &str) -> bool {
 }
 
 /// 通过 COM 自动化打印 Office 文档（静默，不弹出窗口）。
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub fn print_office_via_com(_input: &Path, _printer: &str) -> Result<String, String> {
     // COM 自动化打印实现
     // 通过 Windows Script Host 或直接 COM 调用打印
@@ -125,6 +128,7 @@ $app.Quit()
 }
 
 /// GDI 直打图片（零依赖，静默打印）。
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub async fn print_image(_app: &tauri::AppHandle, _input: &Path, _printer: &str) -> Result<String, String> {
     // GDI 直打图片的实现
     // 通过 Windows GDI 的 StartDoc / StartPage / EndPage API

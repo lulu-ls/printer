@@ -7,6 +7,7 @@
 use std::path::Path;
 use std::process::Command;
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn print_via_lp(path: &Path, printer: &str) -> Result<String, String> {
     let abs = std::fs::canonicalize(path).map_err(|e| e.to_string())?;
     let path_str = abs.to_string_lossy().to_string();
@@ -25,6 +26,7 @@ pub fn print_via_lp(path: &Path, printer: &str) -> Result<String, String> {
 }
 
 /// 检测 macOS 上 Microsoft Office 是否可用（Word / Excel / PowerPoint）
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn macos_office_available() -> bool {
     // 检测 Word 即可代表 Office 套件是否安装（通常三者同时安装或都不装）
     // 用 `mdfind` 查找 .app 包比 osascript 调用更快、不启动任何进程
@@ -41,6 +43,7 @@ pub fn macos_office_available() -> bool {
 
 /// 通过 AppleScript 静默打印 Office 文档（不弹出任何窗口）。
 /// 返回 Ok 表示已成功提交打印，Err 表示失败（将回退 LibreOffice）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn print_office_via_applescript(input: &Path) -> Result<String, String> {
     let abs = std::fs::canonicalize(input).map_err(|e| e.to_string())?;
     let path_str = abs.to_string_lossy().to_string();
