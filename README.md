@@ -50,6 +50,11 @@ npm run tauri build
 - **macOS**：系统自带 CUPS。Office 文档建议安装 Microsoft Office 或 [LibreOffice](https://www.libreoffice.org/)
 - **Windows**：需 [MuPDF](https://mupdf.com/)（`mutool` 在 PATH 中）。Office 文档建议安装 WPS / Office / libreoffice
 
+## 交流
+
+	-- 如果你有什么问题欢迎和我联系（raxzib@gmail.com），或者提交 issue
+    -- 如果对你有帮助，欢迎 star 支持
+
 ## License
 
 MIT

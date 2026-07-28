@@ -13,9 +13,9 @@
     "windows": [
       {
         "title": "打印机助手",
-        "width": 500,
+        "width": 480,
         "height": 700,
-        "minWidth": 480,
+        "minWidth": 400,
         "minHeight": 640,
         "resizable": true,
         "titleBarStyle": "Overlay",

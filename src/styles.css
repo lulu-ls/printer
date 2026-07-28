@@ -382,7 +382,7 @@ body {
 .bottom-bar {
   background: #ffffff;
   border-top: 1px solid #e5e5ea;
-  padding: 16px 32px;
+  padding: 8px 32px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -858,9 +858,9 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 5px 32px;
-  background: #f8f8fa;
-  border-top: 1px solid #eeeef2;
+  padding: 5px 18px;
+  /* background: #e9e9ed; */
+  /* border-top: 1px solid #fdfdfd; */
   z-index: 1;
 }
 
