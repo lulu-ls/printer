@@ -137,12 +137,12 @@ jobs:
       - name: Build
         run: npm run tauri build
 
-      - name: Upload .msi
+      - name: Upload .exe
         uses: actions/upload-artifact@v4
         with:
           name: Printer-Assistant-Windows
-          path: src-tauri/target/release/bundle/**/*
-          if-no-files-found: warn
+          path: src-tauri/target/release/printer-assistant.exe
+          if-no-files-found: error
 
   # ── Release（打 tag 时自动发布） ──────────────────
   release:
