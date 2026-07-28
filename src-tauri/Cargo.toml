@@ -27,6 +27,9 @@ windows = { version = "0.61", features = [
     "Win32_Security",
 ] }
 
+[target.'cfg(windows)'.dependencies]
+winreg = "0.52"
+
 # macOS 上 windows-future 依赖 windows-core::imp::IMarshal/marshaler
 # 但 windows-core 的 imp/windows.rs 仅在 cfg(windows) 下 include
 # 导致 macOS 编译失败。用本地空桩替换。

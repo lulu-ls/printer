@@ -12,6 +12,7 @@ use std::path::Path;
 use std::process::Command;
 #[cfg(windows)]
 use std::ffi::OsString;
+#[allow(unused_imports)]
 use tauri::AppHandle;
 
 pub fn print_via_mutool(path: &Path, printer: &str) -> Result<String, String> {

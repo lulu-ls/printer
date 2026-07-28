@@ -290,7 +290,7 @@ async fn print_file(app: tauri::AppHandle, path: String, printer_name: String) -
             ext.as_str(),
             "png" | "jpg" | "jpeg" | "gif" | "bmp" | "tif" | "tiff" | "webp"
         ) {
-            if let Ok(msg) = printer::print_image(&app, input, &printer_name).await {
+            if let Ok(msg) = printer::windows::print_image(&app, input, &printer_name).await {
                 return Ok(msg);
             }
             // 内置直打失败，回退到 PDF + 外部打印
@@ -302,7 +302,7 @@ async fn print_file(app: tauri::AppHandle, path: String, printer_name: String) -
             ext.as_str(),
             "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx"
         ) {
-            if let Ok(msg) = printer::print_office_via_com(input, &printer_name) {
+            if let Ok(msg) = printer::windows::print_office_via_com(input, &printer_name) {
                 return Ok(msg);
             }
         }
@@ -348,7 +348,7 @@ fn libreoffice_available() -> bool {
 fn office_automation_available() -> bool {
     #[cfg(target_os = "windows")]
     {
-        let ok = printer::detect_office_com("docx").is_some();
+        let ok = printer::windows::detect_office_com("docx").is_some();
         log::info!(target: "office", "office_automation_available -> {}", ok);
         ok
     }
