@@ -21,6 +21,7 @@ body {
    窗口容器
    ===================================================== */
 .window {
+  position: relative;
   width: 100%;
   height: 100%;
   background: #ffffff;
@@ -847,4 +848,32 @@ body {
   position: fixed;
   pointer-events: none;
   z-index: 9999;
+}
+
+/* =====================================================
+   底部小尾巴
+   ===================================================== */
+.footer {
+  position: absolute;
+  bottom: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #b0b0c0;
+  text-decoration: none;
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 0.2s, color 0.2s;
+  z-index: 1;
+  white-space: nowrap;
+}
+.footer:hover {
+  opacity: 1;
+  color: #7070c8;
+}
+.footer svg {
+  flex-shrink: 0;
 }
