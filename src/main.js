@@ -154,6 +154,12 @@ async function init() {
   // 打印按钮
   printBtn.addEventListener('click', startPrint);
 
+  // 底部小尾巴：跳转 GitHub 项目
+  document.querySelector('.footer').addEventListener('click', (e) => {
+    e.preventDefault();
+    invoke('open_url', { url: 'https://github.com/lulu-ls/printer' }).catch(() => {});
+  });
+
   // dropzone 折叠：用 hysteresis（迟滞）避免临界抖动
   // 一旦折叠，只有回到顶部附近才展开；展开后只有超过阈值才折叠
   let dropzoneRafId = null;
