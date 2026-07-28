@@ -1,16 +1,12 @@
 # Printer Assistant
 
-**跨平台桌面打印工具** — 拖拽文件即可打印，无需打开对应的应用。
+每次从微信打印孩子作业，打印公司文件，先从聊天工具保存到桌面，然后图片、excel、doc等不同的文件要先打开不同的预览软件，然后再点击打印，文件多了就很烦，所以做了这个软件
 
-把 PDF、Office 文档、图片、文本文件直接发送到系统打印机，一键完成。基于 Tauri 2 构建，Rust 后端 + 原生 WebView 前端，轻量无依赖。
-
-> 包标识：`com.printer.assistant` · 版本：1.0.0
-
+只需要拖进软件，点击打印就是这么简单
 ---
 
 ## 截图
-
-![screenshot](doc/screenshot.png)
+<img width="1101" height="770" alt="image" src="https://github.com/user-attachments/assets/fa62833a-cea7-4a97-ad65-c15108616e47" />
 
 ## 核心特性
 
