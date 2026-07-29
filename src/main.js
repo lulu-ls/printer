@@ -264,7 +264,7 @@ async function selectFiles() {
         extensions: [
           'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
           'jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'tif', 'webp',
-          'txt', 'rtf', 'csv'
+          'txt', 'rtf', 'csv', 'md', 'html', 'htm'
         ]
       }]
     });
@@ -272,7 +272,7 @@ async function selectFiles() {
 
     const paths = Array.isArray(selected) ? selected : [selected];
     const supported = ['pdf','doc','docx','xls','xlsx','ppt','pptx',
-      'jpg','jpeg','png','gif','bmp','tiff','tif','webp','txt','rtf','csv'];
+      'jpg','jpeg','png','gif','bmp','tiff','tif','webp','txt','rtf','csv','md','html','htm'];
     let added = 0, skipped = 0;
     for (const p of paths) {
       if (p && typeof p === 'string') {
@@ -723,16 +723,15 @@ async function startPrint() {
     return;
   }
 
-  // Demo 模式：不实际打印，模拟成功
+  // Demo 模式：生成 PDF（不实际发送到打印机），供检查输出效果
   if (isDemo) {
     state.printing = true;
     printBtn.disabled = true;
     printBtn.textContent = t('printing');
     let ok = 0;
     for (const f of state.files) {
-      f.status = 'ok';
-      f.error = '';
-      ok++;
+      try { const out = await invoke('build_pdf', { path: f.path }); console.log('demo pdf:', out); ok++; f.status = 'ok'; }
+      catch (_) { f.status = 'fail'; }
       await sleep(300);
     }
     state.printing = false;
@@ -870,7 +869,7 @@ function setupDragDrop() {
       dragOverlay.style.display = 'none';
       if (paths && paths.length) {
         const supported = ['pdf','doc','docx','xls','xlsx','ppt','pptx',
-          'jpg','jpeg','png','gif','bmp','tiff','tif','webp','txt','rtf','csv'];
+          'jpg','jpeg','png','gif','bmp','tiff','tif','webp','txt','rtf','csv','md','html','htm'];
         let added = 0, unsupported = 0;
         (async () => {
           for (const p of paths) {

@@ -2,15 +2,20 @@ mod converter;
 mod pdf;
 mod printer;
 mod logger;
+mod html_webview;
 
 use log::{error, info};
 use serde::Serialize;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::OnceLock;
 use tauri::menu::{CheckMenuItem, Menu, Submenu};
 use tauri::Manager;
 use tauri::Emitter;
+
+/// 全局 AppHandle（供 html_webview 调度到主线程使用）
+pub(crate) static APP_HANDLE: OnceLock<tauri::AppHandle> = OnceLock::new();
 
 // ── Windows 原生打印机枚举（零进程、瞬时，彻底规避 PowerShell 启动卡顿） ──
 #[cfg(target_os = "windows")]
@@ -497,7 +502,158 @@ fn printers_status() -> Vec<PrinterStatusItem> {
     }
 }
 
-/// 读取已保存的语言偏好（"zh" 或 "en"），默认 "zh"。
+/// 读取文件文本内容并内联外部资源（CSS 内联 + 相对路径转绝对 file:// 路径）
+#[tauri::command]
+fn read_html_file(path: String) -> Result<String, String> {
+    use std::path::Path;
+
+    let p = Path::new(&path);
+    let dir = p.parent().unwrap_or(Path::new("/"));
+    let content = std::fs::read_to_string(p).map_err(|e| format!("读取失败: {}", e))?;
+
+    // 手动扫描 HTML，内联 CSS 和解析图片/资源路径
+    let result = inline_resources(&content, dir);
+    Ok(result)
+}
+
+fn inline_resources(html: &str, base_dir: &Path) -> String {
+    let mut out = String::with_capacity(html.len() + 4096);
+    let mut remaining = html;
+
+    while !remaining.is_empty() {
+        // 找 <link 或 <img 开头
+        let find_link = remaining.find("<link");
+        let find_img  = remaining.find("<img");
+        let find_script = remaining.find("<script");
+
+        let earliest = [find_link, find_img, find_script]
+            .iter().filter_map(|&x| x).min();
+
+        match earliest {
+            None => { out.push_str(remaining); break; }
+            Some(pos) => {
+                out.push_str(&remaining[..pos]);
+                remaining = &remaining[pos..];
+                let tag_end = remaining.find('>').unwrap_or(remaining.len() - 1);
+                let tag = &remaining[..=tag_end];
+                remaining = &remaining[tag_end + 1..];
+                let tag_lower = tag.to_lowercase();
+
+                // <link rel="stylesheet" href="..."> → 内联
+                if tag_lower.starts_with("<link") && tag_lower.contains("stylesheet") {
+                    if let Some(href) = extract_attr_value(tag, "href") {
+                        let css_path = base_dir.join(&href);
+                        if let Ok(css) = std::fs::read_to_string(&css_path) {
+                            let resolved = resolve_css_urls(&css, base_dir);
+                            out.push_str("<style>\n");
+                            out.push_str(&resolved);
+                            out.push_str("\n</style>\n");
+                            continue;
+                        }
+                    }
+                }
+
+                // <img src="..."> 相对路径 → 绝对路径
+                if tag_lower.starts_with("<img") {
+                    if let Some(src) = extract_attr_value(tag, "src") {
+                        if !src.starts_with("http://") && !src.starts_with("https://")
+                            && !src.starts_with("file://") && !src.starts_with("data:")
+                            && !src.starts_with('/')
+                        {
+                            let abs = format!("file://{}/{}", base_dir.display(), src);
+                            let new_tag = tag.replace(&format!("src=\"{}\"", &src),
+                                &format!("src=\"{}\"", &abs));
+                            out.push_str(&new_tag);
+                            continue;
+                        }
+                    }
+                }
+
+                out.push_str(tag);
+            }
+        }
+    }
+    out
+}
+
+fn extract_attr_value(tag: &str, attr: &str) -> Option<String> {
+    let lower = tag.to_lowercase();
+    let pattern = format!("{}=\"", attr.to_lowercase());
+    if let Some(start) = lower.find(&pattern) {
+        let val_start = start + pattern.len();
+        let tag_chars: Vec<char> = tag.chars().collect();
+        let mut val = String::new();
+        let mut i = val_start;
+        while i < tag_chars.len() && tag_chars[i] != '"' {
+            val.push(tag_chars[i]);
+            i += 1;
+        }
+        return Some(val);
+    }
+    // 单引号版本
+    let pattern = format!("{}='", attr.to_lowercase());
+    if let Some(start) = lower.find(&pattern) {
+        let val_start = start + pattern.len();
+        let tag_chars: Vec<char> = tag.chars().collect();
+        let mut val = String::new();
+        let mut i = val_start;
+        while i < tag_chars.len() && tag_chars[i] != '\'' {
+            val.push(tag_chars[i]);
+            i += 1;
+        }
+        return Some(val);
+    }
+    None
+}
+
+fn resolve_css_urls(css: &str, base_dir: &Path) -> String {
+    // 把 CSS 中 url(...) 的相对路径转绝对路径
+    let mut result = String::with_capacity(css.len() + 512);
+    let mut remaining = css;
+
+    while let Some(pos) = remaining.find("url(") {
+        result.push_str(&remaining[..pos]);
+        remaining = &remaining[pos + 4..]; // skip "url("
+
+        // 寻找匹配的 )
+        let mut depth = 1u32;
+        let mut end = 0;
+        let chars: Vec<char> = remaining.chars().collect();
+        for (i, &c) in chars.iter().enumerate() {
+            if c == '(' { depth += 1; }
+            else if c == ')' { depth -= 1; if depth == 0 { end = i; break; } }
+        }
+
+        let url_expr = &remaining[..end];
+        remaining = &remaining[end + 1..];
+
+        // 提取 URL（去除引号）
+        let url_value = url_expr.trim().trim_matches('"').trim_matches('\'');
+
+        if !url_value.starts_with("http://") && !url_value.starts_with("https://")
+            && !url_value.starts_with("file://") && !url_value.starts_with("data:")
+            && !url_value.starts_with('/') && !url_value.starts_with('#')
+        {
+            let abs = format!("file://{}/{}", base_dir.display(), url_value);
+            result.push_str(&format!("url({})", &abs));
+        } else {
+            result.push_str(&format!("url({})", url_expr));
+        }
+    }
+    result.push_str(remaining);
+    result
+}
+
+/// 保存前端传来的 PDF 字节到临时文件
+#[tauri::command]
+fn save_pdf(data: Vec<u8>, filename: String) -> Result<String, String> {
+    let tmp = std::env::temp_dir().join("printer_assistant").join(&filename);
+    if let Some(parent) = tmp.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    std::fs::write(&tmp, &data).map_err(|e| format!("写入失败: {}", e))?;
+    Ok(tmp.to_string_lossy().to_string())
+}
 #[tauri::command]
 fn get_language(app: tauri::AppHandle) -> String {
     load_lang(&app)
@@ -570,10 +726,13 @@ pub fn run() {
             printer_online,
             printers_status,
             is_demo,
+            read_html_file,
+            save_pdf,
         ])
         .setup(|app| {
             // 初始化文件日志（500KB 上限，超出自动截断旧内容）
             crate::logger::init(app.handle());
+            let _ = crate::APP_HANDLE.set(app.handle().clone());
 
             // Windows 不使用 Overlay 标题栏（否则会多出一块深色标题区），改用原生标题栏
             #[cfg(target_os = "windows")]
@@ -588,6 +747,13 @@ pub fn run() {
                 let loc = info.location().map(|l| l.to_string()).unwrap_or_default();
                 error!(target: "panic", "线程 panic @ {}: {}", loc, info);
             }));
+
+            // 初始化常驻 PDF 打印引擎（macOS 创建隐藏 WKWebView）
+            info!(target: "app", "初始化打印引擎...");
+            match crate::html_webview::init_print_engine() {
+                Ok(_) => info!(target: "app", "打印引擎初始化成功"),
+                Err(e) => error!(target: "app", "打印引擎初始化失败: {}", e),
+            }
 
             info!(target: "app", "应用启动");
             let handle = app.handle();
