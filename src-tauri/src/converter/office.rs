@@ -109,17 +109,32 @@ pub fn requires_libreoffice(input: &Path) -> bool {
         "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx"
     );
 
+    // Markdown 所有平台都需要 LibreOffice（无原生工具）
+    let md = ext == "md";
+
     #[cfg(target_os = "macos")]
     {
-        office
+        // macOS：HTML 可用 textutil，无需 LO；md 需要
+        office || md
     }
 
     #[cfg(not(target_os = "macos"))]
     {
         office
+            || md
             || matches!(
                 ext.as_str(),
-                "png" | "gif" | "bmp" | "tif" | "tiff" | "webp" | "txt" | "rtf" | "csv"
+                "png"
+                    | "gif"
+                    | "bmp"
+                    | "tif"
+                    | "tiff"
+                    | "webp"
+                    | "txt"
+                    | "rtf"
+                    | "csv"
+                    | "html"
+                    | "htm"
             )
     }
 }
