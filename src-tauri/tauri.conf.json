@@ -1,13 +1,13 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicedoc/tauri-docs/main/packages/api/schemas/config.schema.json",
-  "productName": "打印机助手",
+  "productName": "PrinterAssistant",
   "version": "1.0.0",
   "identifier": "com.printer.assistant",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
     "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build"
+    "beforeBuildCommand": "node scripts/bundle-sumatrapdf.mjs && npm run build"
   },
   "app": {
     "windows": [
@@ -25,7 +25,8 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
+    "targets": ["app", "dmg", "msi", "nsis"],
+    "externalBin": ["binaries/sumatrapdf"],
     "macOS": {
       "minimumSystemVersion": "11.0",
       "signingIdentity": "-"
@@ -44,5 +45,10 @@
       "icons/AppIcon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "shell": {
+      "open": true
+    }
   }
 }

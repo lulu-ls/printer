@@ -4,6 +4,12 @@
 *.dll
 *.so
 *.dylib
+
+# 但 SumatraPDF 侧载 binary 需要被版本管理（打包需要）
+!bin/SumatraPDF-*.exe
+
+# 临时诊断脚本
+diag.ps1
 /printer
 printer.exe
 

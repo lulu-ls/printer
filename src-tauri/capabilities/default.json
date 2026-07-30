@@ -7,6 +7,17 @@
     "core:default",
     "core:window:allow-start-dragging",
     "core:event:default",
-    "dialog:default"
+    "dialog:default",
+    "shell:allow-open",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "binaries/sumatrapdf",
+          "sidecar": true,
+          "args": true
+        }
+      ]
+    }
   ]
 }

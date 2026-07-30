@@ -135,10 +135,20 @@ jobs:
       - name: Build
         run: npm run tauri build
 
-      - name: Upload .exe
+      - name: Upload installers
         uses: actions/upload-artifact@v4
         with:
           name: Printer-Assistant-Windows
+          path: |
+            src-tauri/target/release/printer-assistant.exe
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+
+      - name: Upload portable binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-windows
           path: src-tauri/target/release/printer-assistant.exe
           if-no-files-found: error
 
@@ -186,6 +196,7 @@ jobs:
         with:
           files: |
             release/*.dmg
+            release/*.msi
             release/*.exe
             release/printer-assistant
           generate_release_notes: true
