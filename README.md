@@ -27,6 +27,9 @@ npm run tauri build
 
 依赖：Node.js 18+、Rust 工具链、macOS 需 Xcode CLI（`xcode-select --install`）。
 
+## 问题
+- mac 如果打不开，提示“未打开，apple 无法验证xxxx”的提示，请点击完成后去“系统设置-隐私与安全性-最下边-点击‘仍要打开’ 就行了”
+
 ## 核心特性
 
 - **拖拽即打**：拖入文件或点击选择，支持 PDF、Office（doc/docx/xls/xlsx/ppt/pptx）、图片（png/jpg/gif/bmp/webp/tiff）、纯文本
