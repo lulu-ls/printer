@@ -19,7 +19,7 @@ pub(crate) static APP_HANDLE: OnceLock<tauri::AppHandle> = OnceLock::new();
 
 // ── Windows 原生打印机枚举（零进程、瞬时，彻底规避 PowerShell 启动卡顿） ──
 #[cfg(target_os = "windows")]
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 #[cfg(target_os = "windows")]
 use std::time::{Duration, Instant};
 #[cfg(target_os = "windows")]

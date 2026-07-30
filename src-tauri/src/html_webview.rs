@@ -13,13 +13,19 @@
 /// 回调通道用全局静态 OnceLock<Mutex<Option<Sender>>>，block 整体堆上 + 'static，
 /// 避免原来栈上 `_NSConcreteStackBlock` 出栈即失效的悬垂引用。
 
-use std::ffi::{c_void, CStr};
 use std::path::{Path, PathBuf};
+
+#[cfg(target_os = "macos")]
+use std::ffi::{c_void, CStr};
+#[cfg(target_os = "macos")]
 use std::sync::mpsc;
+#[cfg(target_os = "macos")]
 use std::sync::{Mutex, OnceLock};
+#[cfg(target_os = "macos")]
 use std::time::Duration;
 
 use crate::converter::{office, unique_name};
+#[cfg(target_os = "macos")]
 use crate::APP_HANDLE;
 
 // ── A4 尺寸常量 ────────────────────────────────────
@@ -30,15 +36,18 @@ const A4_PT_H: f64 = 842.0;  // A4 高（PDF 点 @72dpi）
 
 // ── 单例 WKWebView ──────────────────────────────────
 
+#[cfg(target_os = "macos")]
 static ENGINE: OnceLock<Mutex<Engine>> = OnceLock::new();
 
+#[cfg(target_os = "macos")]
 struct Engine {
-    #[allow(dead_code)]
     window: *mut objc2::runtime::NSObject,
     webview: *mut objc2::runtime::NSObject,
 }
 
+#[cfg(target_os = "macos")]
 unsafe impl Send for Engine {}
+#[cfg(target_os = "macos")]
 unsafe impl Sync for Engine {}
 
 #[cfg(target_os = "macos")]
