@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "bundle:sumatra": "node scripts/bundle-sumatrapdf.mjs",
-    "bundle:sumatra:build": "node scripts/bundle-sumatrapdf.mjs --build"
+    "bundle:sumatra:build": "node scripts/bundle-sumatrapdf.mjs --build",
+    "bundle:sumatra:all": "node scripts/bundle-sumatrapdf.mjs --all"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",

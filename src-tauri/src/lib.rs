@@ -282,22 +282,34 @@ fn get_file_info(path: String) -> Result<FileInfo, String> {
 /// 全程不打开任何第三方应用窗口。
 #[tauri::command]
 #[allow(unused_variables)]
-fn print_file(path: String, printer_name: String) -> Result<String, String> {
+async fn print_file(app: tauri::AppHandle, path: String, printer_name: String) -> Result<String, String> {
     info!(target: "print", "print_file: {} -> printer {:?}", path, printer_name);
     let input = Path::new(&path);
 
-    // Windows 下图片走程序内置 GDI 直打（零依赖、静默）；失败再回退通用管线
+    // Windows 下 PDF 优先走打包的 SumatraPDF sidecar
     #[cfg(target_os = "windows")]
     {
         let ext = input
             .extension()
             .map(|e| e.to_string_lossy().to_lowercase())
             .unwrap_or_default();
+
+        // PDF：尝试 SumatraPDF sidecar（静默、可指定打印机）
+        if ext == "pdf" {
+            if let Ok(msg) = printer::windows::print_pdf_via_sumatra(&app, input, &printer_name).await {
+                return Ok(msg);
+            }
+        }
+
+        // 图片：程序内置 GDI 直打（零依赖、静默、可指定打印机）
         if matches!(
             ext.as_str(),
             "png" | "jpg" | "jpeg" | "gif" | "bmp" | "tif" | "tiff" | "webp"
         ) {
-            // GDI 直打暂未实现，回退到通用管线
+            // 优先程序内置 GDI 直打（零依赖、静默、可指定打印机）；失败回退通用管线
+            if let Ok(msg) = printer::windows::print_image(input, &printer_name) {
+                return Ok(msg);
+            }
         }
 
         // Office 文档：优先用本机已装办公软件（WPS / Office）COM 自动化静默打印
@@ -305,8 +317,9 @@ fn print_file(path: String, printer_name: String) -> Result<String, String> {
             ext.as_str(),
             "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx"
         ) {
-            if let Ok(msg) = printer::windows::print_office_via_com(input, &printer_name) {
-                return Ok(msg);
+            match printer::windows::print_office_via_com(input, &printer_name) {
+                Ok(msg) => return Ok(msg),
+                Err(e) => log::warn!(target: "office", "Office COM 静默打印失败，回退 LibreOffice 管线: {}", e),
             }
         }
     }
