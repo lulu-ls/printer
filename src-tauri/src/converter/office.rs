@@ -54,6 +54,7 @@ pub fn libreoffice_to_pdf(input: &Path, tmp: &Path) -> Result<PathBuf, String> {
     })?;
 
     let status = Command::new(&bin)
+        .env("SAL_USE_VCLPLUGIN", "headless")  // 彻底静默，不显示程序坞图标
         .args([
             "--headless",
             "--norestore",
@@ -67,21 +68,27 @@ pub fn libreoffice_to_pdf(input: &Path, tmp: &Path) -> Result<PathBuf, String> {
 
     match status {
         Ok(s) if s.success() => {
-            // 输出文件名 = 原 stem + .pdf（放在 tmp）
+            // LibreOffice 生成的 PDF 文件名，统一用唯一名避免中文/冲突问题
+            let now = chrono::Local::now();
+            let pdf_name = format!("office_lo_{}.pdf", now.format("%Y%m%d_%H%M%S_%3f"));
+            let out = tmp.join(&pdf_name);
+
+            // LibreOffice 输出到 tmp 目录，文件名 = 原 stem + .pdf
             let stem = input
                 .file_stem()
                 .map(|s| s.to_string_lossy().to_string())
                 .unwrap_or_else(|| "document".into());
-            let out = tmp.join(format!("{}.pdf", stem));
-            if out.exists() {
+            let lo_out = tmp.join(format!("{}.pdf", stem));
+            if lo_out.exists() {
+                // 重命名为唯一名
+                let _ = std::fs::rename(&lo_out, &out);
                 return Ok(out);
             }
             // LibreOffice 偶尔放到输入同目录，找一下
             let alt = input.with_extension("pdf");
             if alt.exists() {
-                let moved = tmp.join(format!("{}.pdf", stem));
-                let _ = std::fs::rename(&alt, &moved);
-                return Ok(moved);
+                let _ = std::fs::rename(&alt, &out);
+                return Ok(out);
             }
             Err("LibreOffice 未生成 PDF 输出".into())
         }

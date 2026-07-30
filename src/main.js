@@ -112,13 +112,33 @@ fileCards.addEventListener('mouseover', (e) => {
     tip.style.left = left + 'px';
     tip.style.top = (rect.top - tip.offsetHeight - 8) + 'px';
   }
+  // 失败标签 -> 显示错误原因
+  const failTag = e.target.closest('.file-status-tag.fail');
+  if (failTag) {
+    const err = failTag.dataset.error;
+    if (err) {
+      const tip = ensureNameTip();
+      tip.textContent = err;
+      tip.style.display = 'block';
+      const rect = failTag.getBoundingClientRect();
+      const tw = tip.offsetWidth;
+      let left = rect.left + rect.width / 2 - tw / 2;
+      left = Math.max(8, Math.min(left, window.innerWidth - tw - 8));
+      tip.style.left = left + 'px';
+      tip.style.top = (rect.top - tip.offsetHeight - 8) + 'px';
+    }
+  }
 });
 fileCards.addEventListener('mouseout', (e) => {
   if (e.target.closest('.file-name') && nameTipEl) nameTipEl.style.display = 'none';
+  if (e.target.closest('.file-status-tag.fail') && nameTipEl) nameTipEl.style.display = 'none';
 });
 
 // ── 初始化 ──────────────────────────────────────────
 async function init() {
+  console.log('[DEBUG] init() 开始');
+  logFrontend('info', 'init() 开始');
+
   // 平台相关：Windows 使用原生标题栏，隐藏自绘的深色标题栏
   try {
     const pf = await invoke('platform');
@@ -150,26 +170,42 @@ async function init() {
   showEmpty();
 
   // 拖拽事件
+  logFrontend('info', 'setupDragDrop...');
   setupDragDrop();
 
   // 空状态点击
-  emptyDrop.addEventListener('click', selectFiles);
-  dropZone.addEventListener('click', selectFiles);
+  logFrontend('info', `emptyDrop=${!!emptyDrop}, dropZone=${!!dropZone}`);
+  emptyDrop.addEventListener('click', () => {
+    logFrontend('info', 'emptyDrop clicked');
+    selectFiles();
+  });
+  dropZone.addEventListener('click', () => {
+    logFrontend('info', 'dropZone clicked');
+    selectFiles();
+  });
+
+  logFrontend('info', 'init() 注册事件监听器...');
 
   // 清空按钮
-  clearBtn.addEventListener('click', clearAll);
+  clearBtn.addEventListener('click', () => { logFrontend('info', 'clearAll 点击'); clearAll(); });
 
   // 打印机卡片点击
   printerCard.addEventListener('click', togglePrinterPopup);
 
   // 打印按钮
-  printBtn.addEventListener('click', startPrint);
+  printBtn.addEventListener('click', () => { logFrontend('info', 'printBtn 点击'); startPrint(); });
 
-  // 底部小尾巴：跳转 GitHub 项目
-  document.querySelector('.footer').addEventListener('click', (e) => {
+  // 右下角标：跳转 GitHub 项目
+  const badge = document.getElementById('footerBadge');
+  logFrontend('info', `badge 元素=${!!badge}`);
+  badge.addEventListener('click', (e) => {
+    logFrontend('info', 'badge 点击');
     e.preventDefault();
     invoke('open_url', { url: 'https://github.com/lulu-ls/printer' }).catch(() => {});
   });
+
+  // 语言变更时更新 footer badge 提示
+  // （主 listen 在下方 applyLang 处）
 
   // dropzone 折叠：用 hysteresis（迟滞）避免临界抖动
   // 一旦折叠，只有回到顶部附近才展开；展开后只有超过阈值才折叠
@@ -218,6 +254,9 @@ async function init() {
   loSkipBtn.addEventListener('click', () => closeLoModal('skip'));
   loCancelBtn.addEventListener('click', () => closeLoModal('cancel'));
 
+  // 监听下载进度事件（不再自动下载，保留为空以防遗留事件）
+  // 清理旧的 progress 监听器（如果存在）
+
   // 语言：启动时读取偏好，并监听原生菜单的语言切换事件
   try {
     state.lang = await invoke('get_language');
@@ -225,9 +264,12 @@ async function init() {
     state.lang = 'zh';
   }
   applyLang(state.lang);
+  // 初始化 badge 提示（必须在 applyLang 之后）
+  document.getElementById('footerBadge').dataset.tip = t('footerTip');
   listen('language-changed', (e) => {
     state.lang = e.payload;
     applyLang(state.lang);
+    document.getElementById('footerBadge').dataset.tip = t('footerTip');
   });
 
   // 每 3 秒自动检测一次打印机在线状态（即使不操作也会刷新绿/红点）
@@ -352,7 +394,7 @@ function renderFiles() {
   for (const [id, card] of cardEls) {
     if (!present.has(id)) {
       if (isCardVisible(card)) {
-        burstParticles(card, 180);
+        burstParticles(card, 720);
         card.classList.add('file-card--exit');
         card.addEventListener('animationend', () => collapseCard(id, card), { once: true });
         setTimeout(() => collapseCard(id, card), 500);
@@ -372,7 +414,7 @@ function renderFiles() {
 function cardTemplate(f) {
   let statusHTML = '';
   if (f.status === 'fail') {
-    statusHTML = `<span class="file-status-tag fail" title="${escHtml(f.error)}">${t('failTag')}</span>`;
+    statusHTML = `<span class="file-status-tag fail" data-error="${escHtml(f.error)}">${t('failTag')}</span>`;
   } else if (f.status === 'printing') {
     statusHTML = `<span class="file-status-tag printing"><span class="spinner"></span>${t('printing')}</span>`;
   } else if (f.status === 'queued') {
@@ -414,7 +456,7 @@ function updateFileCard(card, f) {
 }
 
 // ── 卡片删除粒子爆散（Telegram 碎屑风格） ──────────────
-function burstParticles(card, count = 35) {
+function burstParticles(card, count = 140) {
   const rect = card.getBoundingClientRect();
   const colors = ['#ff5f57','#febc2e','#28c840','#4b6bfb','#ff6b6b','#ffd93d','#6bcb77','#4d96ff','#e040fb'];
 
@@ -429,7 +471,7 @@ function burstParticles(card, count = 35) {
     const rad = angle * (Math.PI / 180);
     const tx = Math.cos(rad) * dist;
     const ty = Math.sin(rad) * dist;
-    const size = 3 + Math.random() * 4; // 小粒子
+    const size = 1.5 + Math.random() * 5.5; // 细碎粒子
     p.style.left = (px - size / 2) + 'px';
     p.style.top = (py - size / 2) + 'px';
     p.style.width = size + 'px';
@@ -710,8 +752,36 @@ function closeLoModal(result) {
   }
 }
 
+// ── 重置打印状态（取消/跳过时恢复 UI） ────────────
+function resetPrintingUI() {
+  state.printing = false;
+  printBtn.disabled = false;
+  printBtn.innerHTML = `${PRINT_SVG}<span data-i18n="printBtn">${t('printBtn')}</span>`;
+  clearBtn.disabled = false;
+  fileCards.classList.remove('printing');
+  // 恢复文件状态
+  for (const f of state.files) {
+    if (f.status === 'queued' || f.status === 'printing') f.status = 'waiting';
+    const card = cardEls.get(f.id);
+    if (card) updateFileCard(card, f);
+  }
+}
+
 // ── 打印 ────────────────────────────────────────────
 async function startPrint() {
+  if (state.printing) {
+    logFrontend('info', 'startPrint 跳过：已在打印中');
+    return;
+  }
+  try {
+    await doPrint();
+  } catch (e) {
+    logFrontend('error', `startPrint 异常: ${e}`);
+    resetPrintingUI();
+  }
+}
+
+async function doPrint() {
   if (state.files.length === 0) {
     toast(t('pleaseSelect'));
     return;
@@ -723,73 +793,143 @@ async function startPrint() {
     return;
   }
 
-  // Demo 模式：生成 PDF（不实际发送到打印机），供检查输出效果
-  if (isDemo) {
-    state.printing = true;
-    printBtn.disabled = true;
-    printBtn.textContent = t('printing');
-    let ok = 0;
-    for (const f of state.files) {
-      try { const out = await invoke('build_pdf', { path: f.path }); console.log('demo pdf:', out); ok++; f.status = 'ok'; }
-      catch (_) { f.status = 'fail'; }
-      await sleep(300);
-    }
-    state.printing = false;
-    state.files = state.files.filter((f) => f.status !== 'ok');
-    renderFiles();
-    printBtn.disabled = false;
-    printBtn.innerHTML = `${PRINT_SVG}<span data-i18n="printBtn">${t('printBtn')}</span>`;
-    const msg = t('sentN', { n: ok, printer: state.printerName || t('defaultPrinter') });
-    toast(msg);
-    return;
-  }
-
-  // 本机是否有可用的办公软件 COM 自动化（WPS / Office）。
-  // 有的话 Office 文档可静默打印，无需 LibreOffice。
-  const officeAvailable = await invoke('office_automation_available');
-
-  // 找出需要 LibreOffice 的文件（有办公软件自动化则不算）
-  const needLo = [];
-  for (const f of state.files) {
-    if ((await invoke('needs_libreoffice', { path: f.path })) && !officeAvailable) needLo.push(f);
-  }
-
-  // 有需要时但本机未安装 -> 提示下载或跳过
-  let filesToPrint = state.files;
-  if (needLo.length > 0) {
-    const available = await invoke('libreoffice_available');
-    if (!available) {
-      const action = await showLibreOfficePrompt(needLo.length);
-      if (action === 'download') {
-        toast(t('loOpened'));
-        return;
-      }
-      if (action === 'cancel') {
-        return;
-      }
-      // skip：仅打印无需 LibreOffice 的文件
-      filesToPrint = state.files.filter((f) => !needLo.includes(f));
-      if (filesToPrint.length === 0) {
-        toast(t('skippedAll'));
-        return;
-      }
-      toast(t('skippedN', { n: needLo.length }));
-    }
-  }
-
-  // ── 开始打印 ──────────────────────────────────────
+  // ── 立即更新 UI ──
   state.printing = true;
   printBtn.disabled = true;
   printBtn.textContent = t('printing');
   clearBtn.disabled = true;
   fileCards.classList.add('printing');
-
-  // 所有待打印文件先标记为"排队"
-  for (const f of filesToPrint) {
+  for (const f of state.files) {
     f.status = 'queued';
     const card = cardEls.get(f.id);
     if (card) updateFileCard(card, f);
   }
+  // 第一个排队文件加呼吸灯边框
+  const firstQ = state.files.find(f => f.status === 'queued');
+  if (firstQ) {
+    const firstCard = cardEls.get(firstQ.id);
+    if (firstCard) firstCard.classList.add('file-card--next');
+  }
+  // 让浏览器渲染 UI（至少等一帧，避免连续点击时状态更新被合并）
+  await new Promise(r => setTimeout(r, 50));
+
+  // Demo 模式：生成 PDF（不实际发送到打印机），供检查输出效果
+  if (isDemo) {
+    const [loAvailable, officeAvailable] = await Promise.all([
+      invoke('libreoffice_available'),
+      invoke('office_automation_available')
+    ]);
+    logFrontend('info', `[demo] LO可用=${loAvailable}, Office可用=${officeAvailable}`);
+    const loResults = await Promise.all(state.files.map(f => invoke('needs_libreoffice', { path: f.path })));
+    const needLo = state.files.filter((_, i) => loResults[i]);
+    if (needLo.length > 0 && !loAvailable && !officeAvailable) {
+      const action = await showLibreOfficePrompt(needLo.length);
+      if (action === 'cancel') { resetPrintingUI(); return; }
+      if (action === 'download') { resetPrintingUI(); toast(t('loOpened')); return; }
+      // skip：从队列移除这些文件
+      for (const f of needLo) {
+        f.status = 'initial';
+        const card = cardEls.get(f.id);
+        if (card) {
+          card.classList.remove('file-card--next');
+          updateFileCard(card, f);
+        }
+      }
+      state.files = state.files.filter((f) => !needLo.includes(f));
+      if (state.files.length === 0) { resetPrintingUI(); toast(t('skippedAll')); return; }
+      toast(t('skippedN', { n: needLo.length }));
+      // 给剩余第一个文件加呼吸灯
+      const firstRemaining = state.files.find(f => f.status === 'queued');
+      if (firstRemaining) {
+        const c = cardEls.get(firstRemaining.id);
+        if (c) c.classList.add('file-card--next');
+      }
+    }
+
+    let ok = 0;
+    // 拍快照避免 splice 跳项
+    for (const f of [...state.files]) {
+      const realFile = state.files.find(r => r.id === f.id);
+      if (!realFile) continue;
+
+      // 切到"打印中"
+      realFile.status = 'printing';
+      const card = cardEls.get(realFile.id);
+      if (card) {
+        card.classList.remove('file-card--next');
+        updateFileCard(card, realFile);
+      }
+      // 给下一个排队中的文件加转圈边框
+      const nextQ = state.files.find(f => f.status === 'queued');
+      if (nextQ) {
+        const nextCard = cardEls.get(nextQ.id);
+        if (nextCard) nextCard.classList.add('file-card--next');
+      }
+
+      try {
+        const out = await invoke('build_pdf', { path: realFile.path });
+        console.log('demo pdf:', out);
+        ok++;
+        // 成功：移除文件
+        const idx = state.files.indexOf(realFile);
+        if (idx >= 0) state.files.splice(idx, 1);
+        const cardToRemove = cardEls.get(realFile.id);
+        if (cardToRemove && cardToRemove.isConnected) {
+          cardToRemove.classList.add('file-card--exit');
+          if (isCardVisible(cardToRemove)) burstParticles(cardToRemove);
+          const onDone = () => {
+            cardToRemove.removeEventListener('animationend', onDone);
+            collapseCard(realFile.id, cardToRemove);
+          };
+          cardToRemove.addEventListener('animationend', onDone, { once: true });
+          setTimeout(() => { if (cardToRemove.isConnected) collapseCard(realFile.id, cardToRemove); }, 600);
+        }
+      } catch (_) {
+        realFile.status = 'fail';
+        const failCard = cardEls.get(realFile.id);
+        if (failCard) updateFileCard(failCard, realFile);
+      }
+      await sleep(900);
+    }
+    state.printing = false;
+    clearBtn.disabled = false;
+    fileCards.classList.remove('printing');
+    if (state.files.length === 0) showEmpty();
+    printBtn.disabled = false;
+    printBtn.innerHTML = `${PRINT_SVG}<span data-i18n="printBtn">${t('printBtn')}</span>`;
+    toast(t('resultOkFail', { ok, fail: state.files.length }));
+    return;
+  }
+
+  // 检查可用的转换方案：LO > AppleScript（MS Office）> 提示下载
+  const [loAvailable, officeAvailable] = await Promise.all([
+    invoke('libreoffice_available'),
+    invoke('office_automation_available')
+  ]);
+  logFrontend('info', `LO可用=${loAvailable}, Office可用=${officeAvailable}`);
+
+  // 并行检查所有文件是否需要 LO（避免顺序 IPC 阻塞）
+  const loResults = await Promise.all(state.files.map(f => invoke('needs_libreoffice', { path: f.path })));
+  const needLo = state.files.filter((_, i) => loResults[i]);
+  logFrontend('info', `需要转换的文件数: ${needLo.length}/${state.files.length}`);
+
+  // LO 和 Office 都不可用时 → 提示下载 LO
+  let filesToPrint = state.files;
+  if (needLo.length > 0 && !loAvailable && !officeAvailable) {
+    const action = await showLibreOfficePrompt(needLo.length);
+    if (action === 'cancel') { resetPrintingUI(); return; }
+    if (action === 'download') { resetPrintingUI(); toast(t('loOpened')); return; }
+    // skip：移除被跳过文件的状态标记
+    for (const f of needLo) {
+      f.status = 'initial';
+      const card = cardEls.get(f.id);
+      if (card) updateFileCard(card, f);
+    }
+    filesToPrint = state.files.filter((f) => !needLo.includes(f));
+    if (filesToPrint.length === 0) { resetPrintingUI(); toast(t('skippedAll')); return; }
+    toast(t('skippedN', { n: needLo.length }));
+  }
+  // 如果有 LO 或 Office 其中一种，直接开始打印（LO 走转换管线，Office 走 AppleScript）
 
   // 拍快照：避免迭代中 splice 导致跳项
   let ok = 0, fail = 0;
@@ -802,6 +942,12 @@ async function startPrint() {
     realFile.status = 'printing';
     const card = cardEls.get(realFile.id);
     if (card) updateFileCard(card, realFile);
+    // 给下一个排队中的文件加转圈边框
+    const nextQ = state.files.find(f => f.status === 'queued');
+    if (nextQ) {
+      const nextCard = cardEls.get(nextQ.id);
+      if (nextCard) nextCard.classList.add('file-card--next');
+    }
 
     try {
       await invoke('print_file', { path: realFile.path, printerName: state.printerName });
@@ -832,20 +978,45 @@ async function startPrint() {
       realFile.error = errMsg;
       logFrontend('error', `打印失败 [${realFile.name}]: ${errMsg}`);
 
+      // 标记是否需要 LO 提示（AppleScript 失败 + LO 未安装时）
+      if (errMsg.toLowerCase().includes('libreoffice')) {
+        logFrontend('info', `文件 ${realFile.name} 因缺失 LO 打印失败`);
+        realFile._needsLo = true;
+      }
+
       const failCard = cardEls.get(realFile.id);
       if (failCard) updateFileCard(failCard, realFile);
     }
 
-    await sleep(300);
+    await sleep(900);
+  }
+
+  // ── 打印结束后：AppleScript 失败且 LO 未安装时，弹窗提示下载 ──
+  if (!loAvailable && officeAvailable && fail > 0 && state.files.some(f => f._needsLo)) {
+    const loAvail = await invoke('libreoffice_available');
+    if (!loAvail) {
+      const loFailed = state.files.filter(f => f._needsLo);
+      const action = await showLibreOfficePrompt(loFailed.length);
+      if (action === 'cancel') {
+        // 保持原样
+      } else if (action === 'download') {
+        toast(t('loOpened'));
+      } else if (action === 'skip') {
+        // 移除需要 LO 的文件
+        state.files = state.files.filter(f => !f._needsLo);
+        renderFiles();
+      }
+    }
   }
 
   // ── 结束，恢复 UI ──────────────────────────────────
   state.printing = false;
   clearBtn.disabled = false;
   fileCards.classList.remove('printing');
-
-  // 同步渲染，修复 cardEls 中可能残留的已删除项
-  renderFiles();
+  if (state.files.length === 0) {
+    showEmpty();
+  }
+  // 不调用 renderFiles（collapseCard 已处理 DOM）
 
   const msg = fail === 0
     ? t('sentN', { n: ok, printer: state.printerName || t('defaultPrinter') })

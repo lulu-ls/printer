@@ -62,6 +62,7 @@ fn chain() -> &'static ConverterChain {
 pub fn to_pdf(input: &Path) -> Result<PathBuf, String> {
     let tmp = temp_dir();
     let result = chain().to_pdf(input, &tmp)?;
+    log::info!(target: "convert", "转换完成: {} -> {} (converter: {})", input.display(), result.path.display(), result.converter);
     Ok(result.path)
 }
 
@@ -155,7 +156,6 @@ impl Converter for TextConverter {
     }
     fn convert(&self, input: &Path, output_dir: &Path) -> Result<traits::ConvertOutput, String> {
         text::text_to_pdf(input, output_dir)
-            .or_else(|_| Ok(input.to_path_buf()))
             .map(|path| traits::ConvertOutput {
                 path,
                 converter: self.name(),
@@ -183,19 +183,41 @@ impl Converter for LibreOfficeFallback {
         office::libreoffice_available() || self.exts.is_empty()
     }
     fn convert(&self, input: &Path, output_dir: &Path) -> Result<traits::ConvertOutput, String> {
-        office::libreoffice_to_pdf(input, output_dir)
-            .or_else(|_| Ok(input.to_path_buf()))
-            .map(|path| traits::ConvertOutput {
+        // 先试试 LibreOffice 转换
+        if let Ok(path) = office::libreoffice_to_pdf(input, output_dir) {
+            return Ok(traits::ConvertOutput {
                 path,
                 converter: self.name(),
-            })
+            });
+        }
+        // Office 文档（doc/docx/xls/xlsx/ppt/pptx）不能静默透传，必须要求安装 LibreOffice
+        let ext = input
+            .extension()
+            .map(|e| e.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        let is_office = matches!(
+            ext.as_str(),
+            "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx"
+        );
+        if is_office {
+            return Err("需要 LibreOffice 才能转换 Office 文档，请先安装 LibreOffice".into());
+        }
+        // 非 Office 格式走系统原生打印兜底
+        Ok(traits::ConvertOutput {
+            path: input.to_path_buf(),
+            converter: self.name(),
+        })
     }
 }
 
 // ── 工具函数 ─────────────────────────────────────────
 
 pub fn temp_dir() -> PathBuf {
-    let dir = std::env::temp_dir().join("printer_assistant");
+    let dir = if let Ok(home) = std::env::var("HOME") {
+        PathBuf::from(home).join("Documents/printer-assistant")
+    } else {
+        std::env::temp_dir().join("printer_assistant")
+    };
     let _ = std::fs::create_dir_all(&dir);
     dir
 }

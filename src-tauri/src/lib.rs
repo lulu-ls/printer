@@ -3,6 +3,7 @@ mod pdf;
 mod printer;
 mod logger;
 mod html_webview;
+mod downloader;
 
 use log::{error, info};
 use serde::Serialize;
@@ -281,7 +282,7 @@ fn get_file_info(path: String) -> Result<FileInfo, String> {
 /// 全程不打开任何第三方应用窗口。
 #[tauri::command]
 #[allow(unused_variables)]
-async fn print_file(app: tauri::AppHandle, path: String, printer_name: String) -> Result<String, String> {
+fn print_file(path: String, printer_name: String) -> Result<String, String> {
     info!(target: "print", "print_file: {} -> printer {:?}", path, printer_name);
     let input = Path::new(&path);
 
@@ -296,14 +297,10 @@ async fn print_file(app: tauri::AppHandle, path: String, printer_name: String) -
             ext.as_str(),
             "png" | "jpg" | "jpeg" | "gif" | "bmp" | "tif" | "tiff" | "webp"
         ) {
-            if let Ok(msg) = printer::windows::print_image(&app, input, &printer_name).await {
-                return Ok(msg);
-            }
-            // 内置直打失败，回退到 PDF + 外部打印
+            // GDI 直打暂未实现，回退到通用管线
         }
 
-        // Office 文档：优先用本机已装办公软件（WPS / Office）COM 自动化静默打印；
-        // 检测不到或打印失败则回退到下方 LibreOffice 通用管线
+        // Office 文档：优先用本机已装办公软件（WPS / Office）COM 自动化静默打印
         if matches!(
             ext.as_str(),
             "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx"
@@ -314,8 +311,15 @@ async fn print_file(app: tauri::AppHandle, path: String, printer_name: String) -
         }
     }
 
-    // macOS 下 Office 文档优先通过 AppleScript 调用 Microsoft Office 直接打印
-    // （零依赖、不弹窗），失败再回退到 LibreOffice 通用管线
+    // 1) 优先 LibreOffice：转换为 PDF 后打印
+    let lo_pdf = converter::to_pdf(input);
+    if let Ok(ref pdf) = lo_pdf {
+        if let Ok(msg) = printer::print_pdf(pdf, &printer_name) {
+            return Ok(msg);
+        }
+    }
+
+    // 2) macOS：LO 不可用时，尝试 AppleScript 直接打印
     #[cfg(target_os = "macos")]
     {
         let ext = input
@@ -329,16 +333,12 @@ async fn print_file(app: tauri::AppHandle, path: String, printer_name: String) -
             if let Ok(msg) = printer::macos::print_office_via_applescript(input) {
                 return Ok(msg);
             }
-            // AppleScript 失败（如未装 Office），回退到下方 LibreOffice 通用管线
         }
     }
 
-    // 第一层：统一转换为 PDF（或原生可打印文件）
-    let printable = converter::to_pdf(input)
-        .map_err(|e| { error!(target: "print", "转换失败: {} ({})", e, path); e })?;
-
-    // 第二层：交给系统打印 API
-    printer::print_pdf(&printable, &printer_name)
+    // 3) 最终：返回 LO 转换的错误
+    let pdf = lo_pdf.map_err(|e| { error!(target: "print", "转换失败: {} ({})", e, path); e })?;
+    printer::print_pdf(&pdf, &printer_name)
         .map_err(|e| { error!(target: "print", "打印失败: {} ({})", e, printer_name); e })
 }
 
@@ -375,8 +375,31 @@ fn office_automation_available() -> bool {
 #[tauri::command]
 fn build_pdf(path: String) -> Result<String, String> {
     info!(target: "build", "build_pdf: {}", path);
-    converter::to_pdf(Path::new(&path))
-        .map(|p| p.to_string_lossy().to_string())
+    let input = Path::new(&path);
+
+    // 1) 优先 LibreOffice 转换
+    let lo_result = converter::to_pdf(input);
+    if let Ok(pdf) = &lo_result {
+        return Ok(pdf.to_string_lossy().to_string());
+    }
+
+    // 2) macOS：LO 不可用时尝试 AppleScript（MS Office 另存为 PDF）
+    #[cfg(target_os = "macos")]
+    {
+        let ext = input
+            .extension()
+            .map(|e| e.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        if matches!(ext.as_str(), "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx") {
+            let tmp = converter::temp_dir();
+            if let Ok(pdf_path) = printer::macos::office_to_pdf_via_applescript(input, &tmp) {
+                return Ok(pdf_path.to_string_lossy().to_string());
+            }
+        }
+    }
+
+    // 3) 返回原始 LO 错误
+    lo_result.map(|p| p.to_string_lossy().to_string())
         .map_err(|e| { error!(target: "build", "build_pdf 失败: {} ({})", e, path); e })
 }
 
@@ -728,6 +751,7 @@ pub fn run() {
             is_demo,
             read_html_file,
             save_pdf,
+            downloader::download_libreoffice,
         ])
         .setup(|app| {
             // 初始化文件日志（500KB 上限，超出自动截断旧内容）

@@ -38,7 +38,7 @@ export const STRINGS = {
     exported: '已生成 PDF 到临时文件夹，并在访达中打开',
     sentN: '已发送 {n} 个文件到 {printer}',
     resultOkFail: '成功 {ok}，失败 {fail}（失败项已保留在列表，可重试）',
-    footerTip: '朋友点个 star 让作者开心一天 ✨ 感谢',
+    footerTip: '朋友 点个 star 让作者开心一天 ✨ 感谢',
   },
   en: {
     unsupportedType: 'This file type is not supported. Only PDF, Office documents, images, and text files are supported.',

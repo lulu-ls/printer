@@ -382,7 +382,7 @@ body {
 .bottom-bar {
   background: #ffffff;
   border-top: 1px solid #e5e5ea;
-  padding: 8px 32px;
+  padding: 16px 32px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -791,6 +791,30 @@ body {
   opacity: 0.65;
   pointer-events: none;
 }
+.file-card--next {
+  position: relative;
+}
+.file-card--next::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 14px;
+  padding: 3px;
+  background: conic-gradient(
+    #ff6b6b, #feca57, #48dbfb, #ff9ff3, #54a0ff, #5f27cd, #ff6b6b
+  );
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 1;
+  animation: flowBorder 3s linear infinite;
+}
+@keyframes flowBorder {
+  to { filter: hue-rotate(360deg); }
+}
 
 .file-status-tag.printing {
   min-width: 52px;
@@ -851,56 +875,55 @@ body {
 }
 
 /* =====================================================
-   底部小尾巴
+   右下角标 — 斜角 GitHub 角标
    ===================================================== */
-.footer-bar {
-  flex-shrink: 0;
+.footer-badge {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 44px;
+  height: 44px;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 5px 18px;
-  /* background: #e9e9ed; */
-  /* border-top: 1px solid #fdfdfd; */
-  z-index: 1;
-}
-
-.footer {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11.5px;
-  color: #9090a8;
-  text-decoration: none;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: 7px;
+  background: linear-gradient(to bottom right, transparent 50%, rgba(180, 160, 240, 0.45) 50%);
+  z-index: 5;
   cursor: pointer;
-  transition: color 0.2s;
-  white-space: nowrap;
+  pointer-events: none;
+}
+.footer-badge .footer-icon {
+  pointer-events: auto;
 }
 
-.footer:hover {
-  color: #1b1bdc;
+.footer-badge:hover {
+  background: linear-gradient(to bottom right, transparent 50%, rgba(150, 120, 230, 0.75) 50%);
+  color: #fff;
 }
 
-.footer svg {
-  flex-shrink: 0;
+.footer-icon {
+  display: block;
+  width: 16px;
+  height: 16px;
+  transform: rotate(-45deg);
+  color: #fff;
 }
 
-.footer-tip {
+/* 角标即时提示 */
+.footer-badge:hover::after {
+  content: attr(data-tip);
   position: absolute;
   bottom: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%);
+  right: 0;
   background: rgba(36,36,48,0.92);
   color: #fff;
   font-size: 11px;
-  padding: 5px 11px;
-  border-radius: 7px;
+  padding: 5px 10px;
+  border-radius: 6px;
   white-space: nowrap;
   pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.18s ease;
-  backdrop-filter: blur(4px);
+  z-index: 999;
 }
-.footer:hover .footer-tip {
-  opacity: 1;
-}
+
+
+
