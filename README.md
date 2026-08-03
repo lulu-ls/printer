@@ -60,6 +60,7 @@ npm run tauri build
 
 	-- 如果你有什么问题欢迎和我联系（raxzib@gmail.com），或者提交 issue
     -- 如果对你有帮助，欢迎 star 支持
+	-- qq：741365564
 
 ## License
 
