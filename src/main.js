@@ -283,12 +283,17 @@ async function init() {
   // 一旦折叠，只有回到顶部附近才展开；展开后只有超过阈值才折叠
   let dropzoneRafId = null;
   let dropzoneCollapsed = false;
+  // 折叠安全余量：dropzone 折叠会腾出约 108px（160→52）空间给文件区。
+  // 若可滚动距离 ≤ 此余量，折叠后内容会立刻不足一屏 → canScroll=false → 立即展开，
+  // 形成"缩小→放大"反复横跳（文件勉强撑起一屏时尤为明显）。
+  // 因此只有内容足够多（可滚动距离 > 余量）才允许折叠，折叠后仍保持可滚动。
+  const COLLAPSE_SAFE_MARGIN = 150;
   fileSection.addEventListener('scroll', () => {
     if (dropzoneRafId) return;
     dropzoneRafId = requestAnimationFrame(() => {
       dropzoneRafId = null;
-      const canScroll = fileSection.scrollHeight > fileSection.clientHeight;
-      if (!canScroll) {
+      const scrollable = fileSection.scrollHeight - fileSection.clientHeight;
+      if (scrollable <= 0) {
         dropZone.classList.remove('compact');
         dropzoneCollapsed = false;
         return;
@@ -300,8 +305,8 @@ async function init() {
           dropzoneCollapsed = false;
         }
       } else {
-        // 未折叠：超过阈值才折叠
-        if (fileSection.scrollTop > 40) {
+        // 未折叠：滚动超过阈值且内容足够多时才折叠，避免临界横跳
+        if (fileSection.scrollTop > 40 && scrollable > COLLAPSE_SAFE_MARGIN) {
           dropZone.classList.add('compact');
           dropzoneCollapsed = true;
         }
@@ -565,13 +570,23 @@ function renderFiles() {
   // 已移除的文件：仅对可视区的卡片播动画（不可见的不做无用功）
   for (const [id, card] of cardEls) {
     if (!present.has(id)) {
-      if (isCardVisible(card)) {
-        burstParticles(card, 720);
+      const visible = isCardVisible(card);
+      console.log('[del-anim]', id, 'visible=', visible, 'className=', card.className, 'display=', card.style.display);
+      if (visible) {
+        // 与打印自动删除路径统一：用 CSS class 触发淡出（该路径已被验证稳定）
         card.classList.add('file-card--exit');
-        card.addEventListener('animationend', () => collapseCard(id, card), { once: true });
-        setTimeout(() => collapseCard(id, card), 500);
+        // 延迟到下一帧再爆散粒子：粒子同步创建会压满主线程，
+        // 若与淡出同帧启动会挤掉淡出动画的首帧渲染（表现为透明度不变）
+        requestAnimationFrame(() => burstParticles(card, 120));
+        const onDone = () => {
+          card.removeEventListener('animationend', onDone);
+          collapseCard(id, card);
+        };
+        card.addEventListener('animationend', onDone, { once: true });
+        setTimeout(() => collapseCard(id, card), 800);
       } else {
         // 不在可视区内直接清理，不浪费动画性能
+        console.log('[del-anim]', id, '→ NOT VISIBLE，直接 remove，无动画');
         card.remove();
         cardEls.delete(id);
       }
@@ -728,12 +743,13 @@ function collapseCard(id, card) {
   setTimeout(clean, 500);
 }
 
-// ── 可见性检测：只有可视区内的卡片才播删除动画 ─────
+// ── 可见性检测：只有滚动容器 .file-section 可视区内的卡片才播删除动画 ─────
 function isCardVisible(card) {
-  const content = document.getElementById('content');
-  const cr = content.getBoundingClientRect();
+  const section = document.querySelector('.file-section');
+  if (!section) return true;
+  const sr = section.getBoundingClientRect();
   const cardR = card.getBoundingClientRect();
-  return cardR.bottom > cr.top && cardR.top < cr.bottom;
+  return cardR.bottom > sr.top && cardR.top < sr.bottom;
 }
 
 // ── UI 状态切换（带过渡动画） ───────────────────────

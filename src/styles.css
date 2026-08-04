@@ -236,11 +236,16 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  overflow-y: auto;
+  /* scroll（而非 auto）：滚动条始终占位，宽度恒定，
+     不会在内容增减时出现宽度收缩/展开，避免布局跳变破坏动画；
+     滚动条视觉隐藏，保留滚动能力 */
+  overflow-y: scroll;
   flex: 1;
   min-height: 0;
-  /* 滚动条不占用宽度 */
-  scrollbar-width: thin;
+  scrollbar-width: none; /* Firefox：隐藏滚动条 */
+}
+.file-section::-webkit-scrollbar {
+  display: none; /* WebKit / WKWebView：隐藏滚动条 */
 }
 
 .file-list-header {
@@ -293,6 +298,9 @@ body {
   display: flex;
   align-items: center;
   gap: 14px;
+  /* 强制提升合成层：opacity/transform 动画走 GPU 合成器，
+     避免主线程繁忙（粒子/布局）时淡出动画被跳过 */
+  will-change: opacity, transform;
 }
 
 .file-card.failed {
@@ -919,7 +927,7 @@ body {
   animation: fileCardIn 0.36s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .file-card--exit {
-  animation: fileCardOut 0.38s ease forwards;
+  animation: fileCardOut 0.75s ease forwards;
   pointer-events: none;
 }
 
