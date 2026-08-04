@@ -11,16 +11,21 @@ use std::path::Path;
 use std::process::Command;
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-pub fn print_via_mutool(path: &Path, printer: &str) -> Result<String, String> {
+pub fn print_via_mutool(path: &Path, printer: &str, settings: &crate::printer::PrintSettings) -> Result<String, String> {
     let abs = std::fs::canonicalize(path).map_err(|e| e.to_string())?;
     let path_str = abs.to_string_lossy().to_string();
 
     let output_target = format!("printer:{}", printer);
 
-    let status = Command::new("mutool")
-        .args(["draw", "-o", &output_target])
-        .arg(&path_str)
-        .status();
+    let mut cmd = Command::new("mutool");
+    cmd.args(["draw", "-o", &output_target]);
+    // 份数（mutool 通过 -p 或 print options 支持有限，这里记录日志便于排查）
+    if settings.copies > 1 {
+        log::info!(target: "print", "mutool 打印份数: {}", settings.copies);
+    }
+    cmd.arg(&path_str);
+
+    let status = cmd.status();
 
     match status {
         Ok(s) if s.success() => Ok("ok".into()),

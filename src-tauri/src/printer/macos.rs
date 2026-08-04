@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub fn print_via_lp(path: &Path, printer: &str) -> Result<String, String> {
+pub fn print_via_lp(path: &Path, printer: &str, settings: &crate::printer::PrintSettings) -> Result<String, String> {
     let abs = std::fs::canonicalize(path).map_err(|e| e.to_string())?;
     let path_str = abs.to_string_lossy().to_string();
 
@@ -16,13 +16,58 @@ pub fn print_via_lp(path: &Path, printer: &str) -> Result<String, String> {
     if !printer.is_empty() {
         cmd.arg("-d").arg(printer);
     }
+    // 份数
+    if settings.copies > 1 {
+        cmd.arg("-n").arg(settings.copies.to_string());
+    }
+    // 彩色 / 黑白：只有明确选"黑白"才强制 Gray，
+    // 选"彩色"时不传 ColorModel，让驱动自动决定（兼容单色打印机）
+    if !settings.color {
+        cmd.arg("-o").arg("ColorModel=Gray");
+    }
+    // 单面 / 双面
+    cmd.arg("-o").arg(if settings.duplex {
+        "sides=two-sided-long-edge"
+    } else {
+        "sides=one-sided"
+    });
+    // 纵向 / 横向
+    cmd.arg("-o").arg(if settings.landscape { "landscape" } else { "portrait" });
     cmd.arg(&path_str);
 
     let output = cmd.output().map_err(|e| e.to_string())?;
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).to_string());
     }
-    Ok("ok".into())
+    // lp 输出形如: "request id is Printer-123 (1 file(s))"
+    // 提取任务 ID 供"取消打印"使用
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let job_id = stdout
+        .lines()
+        .find_map(|l| {
+            let s = l.trim();
+            if let Some(rest) = s.strip_prefix("request id is ") {
+                rest.split_whitespace().next().map(|x| x.to_string())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| "ok".into());
+    Ok(job_id)
+}
+
+/// 取消一个已提交的 CUPS 打印任务
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn cancel_print_job(job_id: &str) -> Result<(), String> {
+    let output = Command::new("cancel")
+        .arg(job_id)
+        .output()
+        .map_err(|e| format!("执行 cancel 失败: {}", e))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).to_string())
+    }
 }
 
 // WPS: macOS WPS Office AppleScript 适配（预留，当前版本 WPS AppleScript 接口不完善）

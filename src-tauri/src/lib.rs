@@ -280,11 +280,24 @@ fn get_file_info(path: String) -> Result<FileInfo, String> {
 
 /// 统一打印管线：文件 -> PDF（第一层）-> 系统打印 API（第二层）。
 /// 全程不打开任何第三方应用窗口。
+///
+/// - `settings`: 打印设置（份数/颜色/双面/方向），可空
+/// - `file_id`: 前端文件唯一 id，用于向后端发打印进度事件
 #[tauri::command]
 #[allow(unused_variables)]
-async fn print_file(app: tauri::AppHandle, path: String, printer_name: String) -> Result<String, String> {
+async fn print_file(
+    app: tauri::AppHandle,
+    path: String,
+    printer_name: String,
+    settings: Option<printer::PrintSettings>,
+    file_id: Option<u64>,
+) -> Result<String, String> {
     info!(target: "print", "print_file: {} -> printer {:?}", path, printer_name);
     let input = Path::new(&path);
+    let settings = printer::PrintSettings::from_optional(settings.as_ref());
+
+    // 通知前端：开始转换
+    let _ = app.emit("print-progress", serde_json::json!({ "fileId": file_id, "status": "converting" }));
 
     // Windows 下 PDF 优先走打包的 SumatraPDF sidecar
     #[cfg(target_os = "windows")]
@@ -297,6 +310,7 @@ async fn print_file(app: tauri::AppHandle, path: String, printer_name: String) -
         // PDF：尝试 SumatraPDF sidecar（静默、可指定打印机）
         if ext == "pdf" {
             if let Ok(msg) = printer::windows::print_pdf_via_sumatra(&app, input, &printer_name).await {
+                let _ = app.emit("print-progress", serde_json::json!({ "fileId": file_id, "status": "sending" }));
                 return Ok(msg);
             }
         }
@@ -308,6 +322,7 @@ async fn print_file(app: tauri::AppHandle, path: String, printer_name: String) -
         ) {
             // 优先程序内置 GDI 直打（零依赖、静默、可指定打印机）；失败回退通用管线
             if let Ok(msg) = printer::windows::print_image(input, &printer_name) {
+                let _ = app.emit("print-progress", serde_json::json!({ "fileId": file_id, "status": "sending" }));
                 return Ok(msg);
             }
         }
@@ -318,7 +333,10 @@ async fn print_file(app: tauri::AppHandle, path: String, printer_name: String) -
             "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx"
         ) {
             match printer::windows::print_office_via_com(input, &printer_name) {
-                Ok(msg) => return Ok(msg),
+                Ok(msg) => {
+                    let _ = app.emit("print-progress", serde_json::json!({ "fileId": file_id, "status": "sending" }));
+                    return Ok(msg);
+                }
                 Err(e) => log::warn!(target: "office", "Office COM 静默打印失败，回退 LibreOffice 管线: {}", e),
             }
         }
@@ -327,7 +345,9 @@ async fn print_file(app: tauri::AppHandle, path: String, printer_name: String) -
     // 1) 优先 LibreOffice：转换为 PDF 后打印
     let lo_pdf = converter::to_pdf(input);
     if let Ok(ref pdf) = lo_pdf {
-        if let Ok(msg) = printer::print_pdf(pdf, &printer_name) {
+        // 通知前端：转换完成，开始发送打印任务
+        let _ = app.emit("print-progress", serde_json::json!({ "fileId": file_id, "status": "sending" }));
+        if let Ok(msg) = printer::print_pdf(pdf, &printer_name, &settings) {
             return Ok(msg);
         }
     }
@@ -344,6 +364,7 @@ async fn print_file(app: tauri::AppHandle, path: String, printer_name: String) -
             "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx"
         ) {
             if let Ok(msg) = printer::macos::print_office_via_applescript(input) {
+                let _ = app.emit("print-progress", serde_json::json!({ "fileId": file_id, "status": "sending" }));
                 return Ok(msg);
             }
         }
@@ -351,7 +372,7 @@ async fn print_file(app: tauri::AppHandle, path: String, printer_name: String) -
 
     // 3) 最终：返回 LO 转换的错误
     let pdf = lo_pdf.map_err(|e| { error!(target: "print", "转换失败: {} ({})", e, path); e })?;
-    printer::print_pdf(&pdf, &printer_name)
+    printer::print_pdf(&pdf, &printer_name, &settings)
         .map_err(|e| { error!(target: "print", "打印失败: {} ({})", e, printer_name); e })
 }
 
@@ -690,6 +711,53 @@ fn save_pdf(data: Vec<u8>, filename: String) -> Result<String, String> {
     std::fs::write(&tmp, &data).map_err(|e| format!("写入失败: {}", e))?;
     Ok(tmp.to_string_lossy().to_string())
 }
+
+/// 取消一个已提交的打印任务（macOS CUPS）
+#[tauri::command]
+#[allow(unused_variables)]
+fn cancel_print_job(job_id: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        printer::macos::cancel_print_job(&job_id)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = job_id;
+        Ok(())
+    }
+}
+
+/// 清理转换临时目录里的旧文件。
+/// `older_than_days`: 只删除超过该天数的文件；传 0 表示清空所有。
+/// 返回删除的文件数量。
+#[tauri::command]
+fn clean_temp_files(older_than_days: Option<u64>) -> Result<u64, String> {
+    let days = older_than_days.unwrap_or(1);
+    let dir = converter::temp_dir();
+    if !dir.exists() {
+        return Ok(0);
+    }
+
+    let cutoff = std::time::SystemTime::now()
+        .checked_sub(std::time::Duration::from_secs(days.saturating_mul(86400)))
+        .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+
+    let mut removed: u64 = 0;
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            let modified = std::fs::metadata(&p).and_then(|m| m.modified()).unwrap_or(cutoff);
+            if modified <= cutoff {
+                if std::fs::remove_file(&p).is_ok() {
+                    removed += 1;
+                }
+            }
+        }
+    }
+
+    info!(target: "clean", "清理临时文件: 删除 {} 个 (>{:?} 天)", removed, days);
+    Ok(removed)
+}
 #[tauri::command]
 fn get_language(app: tauri::AppHandle) -> String {
     load_lang(&app)
@@ -764,6 +832,8 @@ pub fn run() {
             is_demo,
             read_html_file,
             save_pdf,
+            clean_temp_files,
+            cancel_print_job,
             downloader::download_libreoffice,
         ])
         .setup(|app| {
@@ -790,6 +860,15 @@ pub fn run() {
             match crate::html_webview::init_print_engine() {
                 Ok(_) => info!(target: "app", "打印引擎初始化成功"),
                 Err(e) => error!(target: "app", "打印引擎初始化失败: {}", e),
+            }
+
+            // 启动时清理 1 天前的转换临时文件
+            {
+                let app = app.handle().clone();
+                std::thread::spawn(move || {
+                    let _ = crate::clean_temp_files(Some(1));
+                    let _ = app.emit("temp-cleaned", serde_json::json!({}));
+                });
             }
 
             info!(target: "app", "应用启动");

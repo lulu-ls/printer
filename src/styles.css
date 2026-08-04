@@ -380,6 +380,7 @@ body {
    底部工具栏
    ===================================================== */
 .bottom-bar {
+  position: relative;
   background: #ffffff;
   border-top: 1px solid #e5e5ea;
   padding: 16px 32px;
@@ -537,6 +538,153 @@ body {
 .print-btn-wrap {
   position: relative;
   flex-shrink: 0;
+}
+
+/* 按钮内加载圈 */
+.btn-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-right: 8px;
+  vertical-align: -2px;
+  border: 2px solid rgba(255,255,255,0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: btnSpin 0.7s linear infinite;
+}
+@keyframes btnSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* 打印+设置 组合按钮 */
+.split-btn {
+  display: inline-flex;
+  align-items: stretch;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #2563eb;
+  box-shadow: 0 3px 10px rgba(37, 99, 235, 0.25);
+}
+.split-btn .print-btn {
+  border: none;
+  border-right: 1px solid rgba(147, 180, 245, 0.3);
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+.split-btn .print-btn:active {
+  transform: none;
+}
+.split-btn .print-btn:disabled {
+  background: #93b4f5;
+  cursor: not-allowed;
+}
+.split-btn .print-settings-btn {
+  border: none;
+  background: transparent;
+  color: rgba(255,255,255,0.85);
+  width: 44px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+.split-btn .print-settings-btn:hover {
+  background: rgba(255,255,255,0.14);
+  color: #fff;
+}
+/* 取消打印警告态：仅文字变色，按钮保持蓝色 */
+.split-btn.cancel-mode .print-btn {
+  color: #ffb84d;
+}
+
+/* 打印设置弹出面板 */
+.settings-popup {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  right: 0;
+  width: 240px;
+  background: #ffffff;
+  border: 1px solid #ececf1;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(30, 30, 60, 0.14);
+  padding: 14px 16px;
+  z-index: 40;
+}
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.settings-row:last-child {
+  margin-bottom: 0;
+}
+.settings-label {
+  font-size: 12.5px;
+  color: #44445f;
+  flex-shrink: 0;
+}
+.settings-input {
+  width: 96px;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid #dedee7;
+  border-radius: 7px;
+  font-size: 12.5px;
+  color: #33334c;
+  background: #fff;
+  outline: none;
+}
+.settings-input:focus {
+  border-color: #4b6bfb;
+}
+
+/* 分段选择器（颜色/双面/方向） */
+.seg {
+  display: inline-flex;
+  background: #f0f0f5;
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.seg-3 .seg-item {
+  padding: 5px 7px;
+  font-size: 11px;
+}
+.seg-item {
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  padding: 5px 11px;
+  font-size: 12px;
+  color: #77778f;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+.seg-item:hover {
+  color: #33334c;
+}
+.seg-item.active {
+  background: #ffffff;
+  color: #1a56db;
+  font-weight: 600;
+  box-shadow: 0 1px 4px rgba(30, 30, 60, 0.12);
+}
+.settings-note {
+  justify-content: center;
+  color: #9a9ab0;
+  font-size: 11px;
+  border-top: 1px solid #f0f0f4;
+  padding-top: 10px;
+  margin-top: 2px;
+}
+.settings-note span {
+  color: #9a9ab0;
 }
 
 .print-btn {
@@ -810,10 +958,19 @@ body {
   mask-composite: exclude;
   pointer-events: none;
   z-index: 1;
-  animation: flowBorder 3s linear infinite;
+  animation: nextPulse 1.5s ease-in-out infinite;
 }
-@keyframes flowBorder {
-  to { filter: hue-rotate(360deg); }
+@keyframes nextPulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+/* 状态区域：容纳状态标签 + 重试按钮 */
+.file-status-area {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .file-status-tag.printing {
@@ -847,9 +1004,32 @@ body {
   opacity: 0.6;
 }
 
-.file-cards.printing .file-delete-btn {
+.file-cards.printing .file-card.printing .file-delete-btn {
   pointer-events: none;
   opacity: 0.3;
+}
+/* 重试按钮 */
+.file-retry-btn {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 7px;
+  background: #e8f0fe;
+  color: #1a56db;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+.file-retry-btn:hover {
+  background: #d8e6fd;
+}
+.file-status-tag.converting {
+  background: #eef4ff;
+  color: #2563eb;
+  font-size: 12px;
 }
 
 .spinner {
