@@ -1,0 +1,6 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicedoc/tauri-docs/main/packages/api/schemas/config.schema.json",
+  "bundle": {
+    "externalBin": ["binaries/sumatrapdf"]
+  }
+}

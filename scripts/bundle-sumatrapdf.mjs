@@ -105,6 +105,15 @@ const args = process.argv.slice(2);
 const modeAll = args.includes('--all');
 const modeBuild = args.includes('--build');
 
+// SumatraPDF 仅用于 Windows 打印。macOS/Linux 构建无需部署 sidecar，
+// 且 Tauri 在非 Windows 平台不会打包 externalBin（tauri.windows.conf.json 限定）。
+// 未显式指定目标（--all/--build/--target=）时，非 Windows 平台直接跳过。
+const hasExplicitTarget = modeAll || modeBuild || args.some(a => a.startsWith('--target='));
+if (!hasExplicitTarget && process.platform !== 'win32') {
+  console.log('[SKIP] 非 Windows 平台，跳过 SumatraPDF sidecar 部署');
+  process.exit(0);
+}
+
 // 收集要部署的目标
 let targets = [];
 

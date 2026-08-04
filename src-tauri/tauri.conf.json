@@ -26,7 +26,6 @@
   "bundle": {
     "active": true,
     "targets": ["app", "dmg", "msi", "nsis"],
-    "externalBin": ["binaries/sumatrapdf"],
     "macOS": {
       "minimumSystemVersion": "11.0",
       "signingIdentity": "-"
