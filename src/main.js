@@ -21,6 +21,14 @@ const state = {
   printerStatuses: {},   // 各打印机在线状态记录：name -> true/false/null（后台轮询更新）
   lang: 'zh',          // zh | en
   printing: false,     // 正在打印中，禁止操作文件
+  cancelPrinting: false, // 用户点击"取消打印"标记，打印循环检测后停止
+  currentJobId: null,  // 当前已提交的 CUPS 任务号，用于取消
+  settings: {
+    copies: 1,
+    color: true,       // true=彩色 / false=黑白
+    duplex: 'off',     // 'off' | 'long' | 'short'
+    orientation: 'portrait', // 'portrait' | 'landscape'
+  },
 };
 
 // Demo 模式（环境变量 DEMO=true）：伪造打印机 + 模拟打印成功，便于录演示视频
@@ -60,6 +68,10 @@ const loDownloadBtn = $('#loDownloadBtn');
 const loSkipBtn    = $('#loSkipBtn');
 const loCancelBtn  = $('#loCancelBtn');
 const titlebar     = $('#titlebar');
+const settingsBtn  = $('#settingsBtn');
+const settingsPopup = $('#settingsPopup');
+const settingsCopies = $('#settingsCopies');
+const splitBtn = document.querySelector('.split-btn');
 
 // 标题栏拖动用（Overlay 样式下原生 data-tauri-drag-region 行为不稳定，
 // 这里显式调用系统 API 保证整条标题栏都可拖动，包含标题文字区域）
@@ -95,9 +107,29 @@ function ensureNameTip() {
   return nameTipEl;
 }
 fileCards.addEventListener('click', (e) => {
-  if (state.printing) return;
+  // 失败文件的重试按钮：任何时候都可点（打印中也行）
+  const retryBtn = e.target.closest('.file-retry-btn');
+  if (retryBtn) {
+    const f = state.files.find(x => x.id === Number(retryBtn.dataset.id));
+    if (f && f.status === 'fail') {
+      retryFile(f);
+    }
+    return;
+  }
+
+  // 删除按钮：打印中只允许删除"排队中/转换中/失败"的文件（不能删正在打印的）
   const btn = e.target.closest('.file-delete-btn');
-  if (btn) removeFileById(Number(btn.dataset.id));
+  if (btn) {
+    const id = Number(btn.dataset.id);
+    if (state.printing) {
+      const f = state.files.find(x => x.id === id);
+      if (!f || f.status === 'printing' || f.status === 'sent') {
+        toast(t('printingLocked'));
+        return;
+      }
+    }
+    removeFileById(id);
+  }
 });
 fileCards.addEventListener('mouseover', (e) => {
   const nameEl = e.target.closest('.file-name');
@@ -192,8 +224,48 @@ async function init() {
   // 打印机卡片点击
   printerCard.addEventListener('click', togglePrinterPopup);
 
-  // 打印按钮
-  printBtn.addEventListener('click', () => { logFrontend('info', 'printBtn 点击'); startPrint(); });
+  // 打印按钮：空闲时开始打印；打印中时切换为"取消打印"
+  printBtn.addEventListener('click', () => {
+    if (state.printing) {
+      cancelPrinting();
+    } else {
+      startPrint();
+    }
+  });
+
+  // ── 打印设置面板 ──────────────────────────────
+  settingsBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const show = settingsPopup.style.display !== 'block';
+    settingsPopup.style.display = show ? 'block' : 'none';
+  });
+  document.addEventListener('click', (e) => {
+    if (!settingsPopup.contains(e.target) && !e.target.closest('#settingsBtn')) {
+      settingsPopup.style.display = 'none';
+    }
+  });
+  settingsCopies.addEventListener('change', () => {
+    let v = parseInt(settingsCopies.value, 10);
+    if (!v || v < 1) v = 1;
+    if (v > 99) v = 99;
+    settingsCopies.value = v;
+    state.settings.copies = v;
+  });
+
+  // 分段选择器：颜色 / 双面 / 方向
+  function bindSeg(segId, apply) {
+    const seg = document.getElementById(segId);
+    seg.addEventListener('click', (e) => {
+      const btn = e.target.closest('.seg-item');
+      if (!btn) return;
+      seg.querySelectorAll('.seg-item').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      apply(btn.dataset.value);
+    });
+  }
+  bindSeg('settingsColorSeg', (v) => { state.settings.color = v !== 'gray'; });
+  bindSeg('settingsDuplexSeg', (v) => { state.settings.duplex = v; });
+  bindSeg('settingsOrientationSeg', (v) => { state.settings.orientation = v; });
 
   // 右下角标：跳转 GitHub 项目
   const badge = document.getElementById('footerBadge');
@@ -211,12 +283,17 @@ async function init() {
   // 一旦折叠，只有回到顶部附近才展开；展开后只有超过阈值才折叠
   let dropzoneRafId = null;
   let dropzoneCollapsed = false;
+  // 折叠安全余量：dropzone 折叠会腾出约 108px（160→52）空间给文件区。
+  // 若可滚动距离 ≤ 此余量，折叠后内容会立刻不足一屏 → canScroll=false → 立即展开，
+  // 形成"缩小→放大"反复横跳（文件勉强撑起一屏时尤为明显）。
+  // 因此只有内容足够多（可滚动距离 > 余量）才允许折叠，折叠后仍保持可滚动。
+  const COLLAPSE_SAFE_MARGIN = 150;
   fileSection.addEventListener('scroll', () => {
     if (dropzoneRafId) return;
     dropzoneRafId = requestAnimationFrame(() => {
       dropzoneRafId = null;
-      const canScroll = fileSection.scrollHeight > fileSection.clientHeight;
-      if (!canScroll) {
+      const scrollable = fileSection.scrollHeight - fileSection.clientHeight;
+      if (scrollable <= 0) {
         dropZone.classList.remove('compact');
         dropzoneCollapsed = false;
         return;
@@ -228,8 +305,8 @@ async function init() {
           dropzoneCollapsed = false;
         }
       } else {
-        // 未折叠：超过阈值才折叠
-        if (fileSection.scrollTop > 40) {
+        // 未折叠：滚动超过阈值且内容足够多时才折叠，避免临界横跳
+        if (fileSection.scrollTop > 40 && scrollable > COLLAPSE_SAFE_MARGIN) {
           dropZone.classList.add('compact');
           dropzoneCollapsed = true;
         }
@@ -276,6 +353,26 @@ async function init() {
   setInterval(() => {
     if (!state.noPrinter) refreshStatuses();
   }, 3000);
+
+  // ── 打印进度事件（后端在转换/发送阶段推送） ──────────
+  listen('print-progress', (e) => {
+    const { fileId, status } = e.payload || {};
+    if (fileId == null) return;
+    const f = state.files.find(x => x.id === fileId);
+    if (!f) return;
+    if (status === 'converting') {
+      f.status = 'converting';
+      const card = cardEls.get(f.id);
+      if (card) updateFileCard(card, f);
+    } else if (status === 'sending') {
+      f.status = 'printing';
+      const card = cardEls.get(f.id);
+      if (card) updateFileCard(card, f);
+    }
+  });
+
+  // 启动时清理 1 天前的临时转换文件
+  invoke('clean_temp_files', { olderThanDays: 1 }).catch(() => {});
 }
 
 // ── 国际化：根据语言刷新全部文案（含动态文本） ───────────
@@ -359,10 +456,90 @@ function removeFileById(id) {
   renderFiles();
 }
 
+// 重试单个失败文件（不进入主打印队列，独立调用后端打印）
+async function retryFile(f) {
+  if (state.printing && f.status === 'printing') return;
+  f.status = 'converting';
+  f.error = '';
+  const card = cardEls.get(f.id);
+  if (card) {
+    card.classList.remove('file-card--next');
+    updateFileCard(card, f);
+  }
+  try {
+    const jobId = await invoke('print_file', {
+      path: f.path,
+      printerName: state.printerName,
+      settings: buildPrintSettings(),
+      fileId: f.id,
+    });
+    if (jobId && jobId !== 'ok') state.currentJobId = jobId;
+    // 成功：移除文件
+    const idx = state.files.indexOf(f);
+    if (idx >= 0) state.files.splice(idx, 1);
+    const cardToRemove = cardEls.get(f.id);
+    if (cardToRemove && cardToRemove.isConnected) {
+      cardToRemove.classList.add('file-card--exit');
+      if (isCardVisible(cardToRemove)) burstParticles(cardToRemove);
+      const onDone = () => {
+        cardToRemove.removeEventListener('animationend', onDone);
+        collapseCard(f.id, cardToRemove);
+      };
+      cardToRemove.addEventListener('animationend', onDone, { once: true });
+      setTimeout(() => { if (cardToRemove.isConnected) collapseCard(f.id, cardToRemove); }, 800);
+    }
+    if (state.files.length === 0) showEmpty();
+  } catch (e) {
+    f.status = 'fail';
+    f.error = String(e && e.message ? e.message : e);
+    const failCard = cardEls.get(f.id);
+    if (failCard) updateFileCard(failCard, f);
+    toast(f.error);
+  }
+}
+
+let clearing = false;
 function clearAll() {
-  if (state.printing) return;
-  state.files = [];
-  renderFiles();
+  if (state.printing || clearing) return;
+  if (state.files.length === 0) return;
+
+  // 先播放所有卡片的退场动画，动画结束（约500ms）后再清空，
+  // 避免 showEmpty 提前隐藏文件页把动画截断
+  clearing = true;
+  for (const card of cardEls.values()) {
+    if (!card.isConnected) continue;
+    if (isCardVisible(card)) {
+      card.animate(
+        [{ opacity: 1 }, { opacity: 0 }],
+        { duration: 750, easing: 'ease', fill: 'forwards' }
+      );
+      // 延迟一帧再爆粒子，避免压过淡出动画首帧
+      requestAnimationFrame(() => burstParticles(card));
+    } else {
+      card.classList.add('file-card--exit');
+    }
+  }
+
+  setTimeout(() => {
+    clearing = false;
+    state.files = [];
+    // 直接移除全部卡片，避免 renderFiles 对已退场卡片重复播动画
+    for (const card of cardEls.values()) {
+      card.remove();
+    }
+    cardEls.clear();
+    renderFiles();
+  }, 800);
+}
+
+// 读取当前设置面板，组装传给后端的 settings 参数
+function buildPrintSettings() {
+  return {
+    copies: state.settings.copies,
+    color: state.settings.color,
+    duplex: state.settings.duplex === 'off' ? false : true,
+    landscape: state.settings.orientation === 'landscape',
+  };
 }
 
 // ── 渲染文件列表 ────────────────────────────────────
@@ -393,13 +570,23 @@ function renderFiles() {
   // 已移除的文件：仅对可视区的卡片播动画（不可见的不做无用功）
   for (const [id, card] of cardEls) {
     if (!present.has(id)) {
-      if (isCardVisible(card)) {
-        burstParticles(card, 720);
+      const visible = isCardVisible(card);
+      console.log('[del-anim]', id, 'visible=', visible, 'className=', card.className, 'display=', card.style.display);
+      if (visible) {
+        // 与打印自动删除路径统一：用 CSS class 触发淡出（该路径已被验证稳定）
         card.classList.add('file-card--exit');
-        card.addEventListener('animationend', () => collapseCard(id, card), { once: true });
-        setTimeout(() => collapseCard(id, card), 500);
+        // 延迟到下一帧再爆散粒子：粒子同步创建会压满主线程，
+        // 若与淡出同帧启动会挤掉淡出动画的首帧渲染（表现为透明度不变）
+        requestAnimationFrame(() => burstParticles(card, 120));
+        const onDone = () => {
+          card.removeEventListener('animationend', onDone);
+          collapseCard(id, card);
+        };
+        card.addEventListener('animationend', onDone, { once: true });
+        setTimeout(() => collapseCard(id, card), 800);
       } else {
         // 不在可视区内直接清理，不浪费动画性能
+        console.log('[del-anim]', id, '→ NOT VISIBLE，直接 remove，无动画');
         card.remove();
         cardEls.delete(id);
       }
@@ -410,23 +597,34 @@ function renderFiles() {
   updatePrintBtnDisabledTip();
 }
 
-// 文件卡片 HTML 模板（create / update 共用）
-function cardTemplate(f) {
-  let statusHTML = '';
+// 状态标签 HTML（失败/打印中/转换中/排队）
+function statusTagHTML(f) {
   if (f.status === 'fail') {
-    statusHTML = `<span class="file-status-tag fail" data-error="${escHtml(f.error)}">${t('failTag')}</span>`;
+    return `<span class="file-status-tag fail" data-error="${escHtml(f.error)}">${t('failTag')}</span>`
+      + `<button class="file-retry-btn" data-id="${f.id}" type="button" title="${t('retry')}">`
+      + `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13">`
+      + `<path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>`
+      + `<path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>`
+      + `</svg></button>`;
   } else if (f.status === 'printing') {
-    statusHTML = `<span class="file-status-tag printing"><span class="spinner"></span>${t('printing')}</span>`;
+    return `<span class="file-status-tag printing"><span class="spinner"></span>${t('printing')}</span>`;
+  } else if (f.status === 'converting') {
+    return `<span class="file-status-tag converting"><span class="spinner"></span>${t('converting')}</span>`;
   } else if (f.status === 'queued') {
-    statusHTML = `<span class="file-status-tag queued">${t('queuedTag')}</span>`;
+    return `<span class="file-status-tag queued">${t('queuedTag')}</span>`;
   }
+  return '';
+}
+
+// 文件卡片 HTML 模板（create 用）
+function cardTemplate(f) {
   return `
     <div class="file-type-badge">${escHtml(f.ext)}</div>
     <div class="file-info">
       <span class="file-name">${escHtml(f.name)}</span>
       <span class="file-size">${escHtml(f.size)}</span>
     </div>
-    ${statusHTML}
+    <div class="file-status-area">${statusTagHTML(f)}</div>
     <button class="file-delete-btn" data-id="${f.id}" type="button" title="${t('removeTitle')}">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <polyline points="3 6 5 6 21 6"/>
@@ -437,22 +635,26 @@ function cardTemplate(f) {
     </button>`;
 }
 
-function createFileCard(f) {
-  const el = document.createElement('div');
-  el.className = 'file-card'
+function fileCardClass(f) {
+  return 'file-card'
     + (f.status === 'fail' ? ' failed' : '')
     + (f.status === 'printing' ? ' printing' : '')
+    + (f.status === 'converting' ? ' converting' : '')
     + (f.status === 'queued' ? ' queued' : '');
+}
+
+function createFileCard(f) {
+  const el = document.createElement('div');
+  el.className = fileCardClass(f);
   el.innerHTML = cardTemplate(f);
   return el;
 }
 
 function updateFileCard(card, f) {
-  card.className = 'file-card'
-    + (f.status === 'fail' ? ' failed' : '')
-    + (f.status === 'printing' ? ' printing' : '')
-    + (f.status === 'queued' ? ' queued' : '');
-  card.innerHTML = cardTemplate(f);
+  card.className = fileCardClass(f);
+  // 只更新状态区域，不重建整个卡片（避免 innerHTML 解析开销导致主线程卡顿）
+  const area = card.querySelector('.file-status-area');
+  if (area) area.innerHTML = statusTagHTML(f);
 }
 
 // ── 卡片删除粒子爆散（Telegram 碎屑风格） ──────────────
@@ -541,12 +743,13 @@ function collapseCard(id, card) {
   setTimeout(clean, 500);
 }
 
-// ── 可见性检测：只有可视区内的卡片才播删除动画 ─────
+// ── 可见性检测：只有滚动容器 .file-section 可视区内的卡片才播删除动画 ─────
 function isCardVisible(card) {
-  const content = document.getElementById('content');
-  const cr = content.getBoundingClientRect();
+  const section = document.querySelector('.file-section');
+  if (!section) return true;
+  const sr = section.getBoundingClientRect();
   const cardR = card.getBoundingClientRect();
-  return cardR.bottom > cr.top && cardR.top < cr.bottom;
+  return cardR.bottom > sr.top && cardR.top < sr.bottom;
 }
 
 // ── UI 状态切换（带过渡动画） ───────────────────────
@@ -755,22 +958,58 @@ function closeLoModal(result) {
 // ── 重置打印状态（取消/跳过时恢复 UI） ────────────
 function resetPrintingUI() {
   state.printing = false;
+  state.cancelPrinting = false;
+  state.currentJobId = null;
   printBtn.disabled = false;
   printBtn.innerHTML = `${PRINT_SVG}<span data-i18n="printBtn">${t('printBtn')}</span>`;
+  if (splitBtn) splitBtn.classList.remove('cancel-mode');
   clearBtn.disabled = false;
   fileCards.classList.remove('printing');
   // 恢复文件状态
   for (const f of state.files) {
-    if (f.status === 'queued' || f.status === 'printing') f.status = 'waiting';
+    if (f.status === 'queued' || f.status === 'printing' || f.status === 'converting') f.status = 'waiting';
     const card = cardEls.get(f.id);
     if (card) updateFileCard(card, f);
   }
 }
 
+// ── 取消打印：标记取消，打印循环检测后停止 ──────────
+function cancelPrinting() {
+  if (!state.printing || state.cancelPrinting) return;
+  state.cancelPrinting = true;
+  printBtn.disabled = true;
+  printBtn.textContent = t('cancelling');
+  toast(t('cancelling'));
+  logFrontend('info', '用户请求取消打印');
+  // 取消当前已提交的任务
+  if (state.currentJobId) {
+    invoke('cancel_print_job', { jobId: state.currentJobId }).catch(() => {});
+    state.currentJobId = null;
+  }
+}
+
+// 调用后端打印，记录任务号；若已请求取消则立即取消刚提交的任务
+async function handlePrintResult(f) {
+  const jobId = await invoke('print_file', {
+    path: f.path,
+    printerName: state.printerName,
+    settings: buildPrintSettings(),
+    fileId: f.id,
+  });
+  if (jobId && jobId !== 'ok') {
+    state.currentJobId = jobId;
+    if (state.cancelPrinting) {
+      invoke('cancel_print_job', { jobId }).catch(() => {});
+      state.currentJobId = null;
+    }
+  }
+  return jobId;
+}
+
 // ── 打印 ────────────────────────────────────────────
 async function startPrint() {
-  if (state.printing) {
-    logFrontend('info', 'startPrint 跳过：已在打印中');
+  if (state.printing || clearing) {
+    logFrontend('info', 'startPrint 跳过：已在打印中/正在清空');
     return;
   }
   try {
@@ -793,10 +1032,11 @@ async function doPrint() {
     return;
   }
 
-  // ── 立即更新 UI ──
+  // ── 立即更新 UI：加载阶段按钮不可点击 ──
   state.printing = true;
+  state.cancelPrinting = false;
   printBtn.disabled = true;
-  printBtn.textContent = t('printing');
+  printBtn.innerHTML = `<span class="btn-spinner"></span>${t('printing')}`;
   clearBtn.disabled = true;
   fileCards.classList.add('printing');
   for (const f of state.files) {
@@ -846,14 +1086,28 @@ async function doPrint() {
       }
     }
 
+    // 进入实际打印阶段：按钮变为可点击的"取消打印"（红色警告样式）
+    printBtn.disabled = false;
+    printBtn.innerHTML = t('cancelPrint');
+    if (splitBtn) splitBtn.classList.add('cancel-mode');
+
     let ok = 0;
     // 拍快照避免 splice 跳项
     for (const f of [...state.files]) {
+      // 取消打印：跳过剩余文件
+      if (state.cancelPrinting) {
+        if (f.status === 'queued') {
+          f.status = 'waiting';
+          const c = cardEls.get(f.id);
+          if (c) { c.classList.remove('file-card--next'); updateFileCard(c, f); }
+        }
+        continue;
+      }
       const realFile = state.files.find(r => r.id === f.id);
       if (!realFile) continue;
 
-      // 切到"打印中"
-      realFile.status = 'printing';
+      // 切到"转换中"
+      realFile.status = 'converting';
       const card = cardEls.get(realFile.id);
       if (card) {
         card.classList.remove('file-card--next');
@@ -882,7 +1136,7 @@ async function doPrint() {
             collapseCard(realFile.id, cardToRemove);
           };
           cardToRemove.addEventListener('animationend', onDone, { once: true });
-          setTimeout(() => { if (cardToRemove.isConnected) collapseCard(realFile.id, cardToRemove); }, 600);
+          setTimeout(() => { if (cardToRemove.isConnected) collapseCard(realFile.id, cardToRemove); }, 800);
         }
       } catch (_) {
         realFile.status = 'fail';
@@ -892,8 +1146,10 @@ async function doPrint() {
       await sleep(900);
     }
     state.printing = false;
+    state.cancelPrinting = false;
     clearBtn.disabled = false;
     fileCards.classList.remove('printing');
+    if (splitBtn) splitBtn.classList.remove('cancel-mode');
     if (state.files.length === 0) showEmpty();
     printBtn.disabled = false;
     printBtn.innerHTML = `${PRINT_SVG}<span data-i18n="printBtn">${t('printBtn')}</span>`;
@@ -931,15 +1187,29 @@ async function doPrint() {
   }
   // 如果有 LO 或 Office 其中一种，直接开始打印（LO 走转换管线，Office 走 AppleScript）
 
+  // 进入实际打印阶段：按钮变为可点击的"取消打印"（红色警告样式）
+  printBtn.disabled = false;
+  printBtn.innerHTML = t('cancelPrint');
+  if (splitBtn) splitBtn.classList.add('cancel-mode');
+
   // 拍快照：避免迭代中 splice 导致跳项
   let ok = 0, fail = 0;
   for (const f of [...filesToPrint]) {
+    // 取消打印：跳过剩余文件
+    if (state.cancelPrinting) {
+      if (f.status === 'queued') {
+        f.status = 'waiting';
+        const c = cardEls.get(f.id);
+        if (c) { c.classList.remove('file-card--next'); updateFileCard(c, f); }
+      }
+      continue;
+    }
     // 文件可能被外部删除（比如在 LO 提示后），跳过
     const realFile = state.files.find(r => r.id === f.id);
     if (!realFile) continue;
 
-    // 切到"打印中"
-    realFile.status = 'printing';
+    // 切到"转换中"（后端发 sending 事件后变为"打印中"）
+    realFile.status = 'converting';
     const card = cardEls.get(realFile.id);
     if (card) updateFileCard(card, realFile);
     // 给下一个排队中的文件加转圈边框
@@ -950,7 +1220,15 @@ async function doPrint() {
     }
 
     try {
-      await invoke('print_file', { path: realFile.path, printerName: state.printerName });
+      await handlePrintResult(realFile);
+
+      // 用户请求取消：刚提交的任务已取消，当前文件恢复等待
+      if (state.cancelPrinting) {
+        realFile.status = 'waiting';
+        const c = cardEls.get(realFile.id);
+        if (c) { c.classList.remove('file-card--next'); updateFileCard(c, realFile); }
+        continue;
+      }
 
       // 打印成功：爆散粒子 + 退场动画 + 塌缩
       ok++;
@@ -1011,8 +1289,10 @@ async function doPrint() {
 
   // ── 结束，恢复 UI ──────────────────────────────────
   state.printing = false;
+  state.cancelPrinting = false;
   clearBtn.disabled = false;
   fileCards.classList.remove('printing');
+  if (splitBtn) splitBtn.classList.remove('cancel-mode');
   if (state.files.length === 0) {
     showEmpty();
   }

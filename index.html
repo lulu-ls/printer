@@ -80,14 +80,54 @@
         </svg>
       </div>
       <div class="print-btn-wrap" id="printBtnWrap">
-        <button class="print-btn" id="printBtn" type="button">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20">
-            <polyline points="6 9 6 2 18 2 18 9"/>
-            <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
-            <rect x="6" y="14" width="12" height="8"/>
-          </svg>
-          <span data-i18n="printBtn">开始打印</span>
-        </button>
+        <div class="split-btn">
+          <button class="print-btn" id="printBtn" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20">
+              <polyline points="6 9 6 2 18 2 18 9"/>
+              <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+              <rect x="6" y="14" width="12" height="8"/>
+            </svg>
+            <span data-i18n="printBtn">开始打印</span>
+          </button>
+          <button class="print-settings-btn" id="settingsBtn" type="button" title="打印设置">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="17" height="17">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+          </button>
+        </div>
+        <!-- 打印设置弹出层 -->
+        <div class="settings-popup" id="settingsPopup" style="display:none">
+          <div class="settings-row">
+            <span class="settings-label" data-i18n="copies">份数</span>
+            <input type="number" id="settingsCopies" class="settings-input" min="1" max="99" value="1">
+          </div>
+          <div class="settings-row">
+            <span class="settings-label" data-i18n="colorMode">颜色</span>
+            <div class="seg" id="settingsColorSeg">
+              <button type="button" class="seg-item active" data-value="color" data-i18n="colorOn">彩色</button>
+              <button type="button" class="seg-item" data-value="gray" data-i18n="colorOff">黑白</button>
+            </div>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label" data-i18n="orientation">方向</span>
+            <div class="seg" id="settingsOrientationSeg">
+              <button type="button" class="seg-item active" data-value="portrait" data-i18n="portrait">纵向</button>
+              <button type="button" class="seg-item" data-value="landscape" data-i18n="landscape">横向</button>
+            </div>
+          </div>
+           <div class="settings-row">
+            <span class="settings-label" data-i18n="duplex">双面打印</span>
+            <div class="seg seg-3" id="settingsDuplexSeg">
+              <button type="button" class="seg-item active" data-value="off" data-i18n="duplexOff">单面</button>
+              <button type="button" class="seg-item" data-value="long" data-i18n="duplexLong">长边</button>
+              <button type="button" class="seg-item" data-value="short" data-i18n="duplexShort">短边</button>
+            </div>
+          </div>
+          <div class="settings-row settings-note">
+            <span data-i18n="settingsApplyNext">设置将在下次打印时生效</span>
+          </div>
+        </div>
         <div class="print-btn-tooltip" id="printBtnTooltip"></div>
       </div>
     </div>
