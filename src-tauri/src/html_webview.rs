@@ -100,20 +100,25 @@ pub fn html_engine_available() -> bool {
 }
 
 pub fn html_to_pdf(input: &Path, tmp: &Path) -> Result<PathBuf, String> {
-    // 1. Chrome headless（渲染最稳定，支持 JS 图表）
-    let out = tmp.join(unique_name("html", "pdf"));
-    if chrome_to_pdf(input, &out).is_ok() && out.exists() { return Ok(out); }
-
-    // 2. macOS textutil（Safari/WebKit 内核，zero 额外依赖）
+    // macOS：优先用 textutil（系统内置，WebKit 引擎，零额外依赖，不会弹出任何进程）
     #[cfg(target_os = "macos")]
     { let out = tmp.join(unique_name("html", "pdf"));
       if textutil_to_pdf(input, &out).is_ok() && out.exists() { return Ok(out); }}
 
-    // 3. Fulgur（纯 Rust 引擎，无 JS，快速静态兜底）
+    // 非 macOS：优先 Chrome headless（渲染最稳定，支持 JS 图表）
+    #[cfg(not(target_os = "macos"))]
+    { let out = tmp.join(unique_name("html", "pdf"));
+      if chrome_to_pdf(input, &out).is_ok() && out.exists() { return Ok(out); }}
+
+    // Fulgur（纯 Rust 引擎，无 JS，快速静态兜底）
     let out = tmp.join(unique_name("html", "pdf"));
     if fulgur_to_pdf(input, &out).is_ok() && out.exists() { return Ok(out); }
 
-    // 4. LibreOffice（最终兜底）
+    // Chrome 备选（macOS textutil 失败时兜底；非 macOS Fulgur 失败时兜底）
+    let out = tmp.join(unique_name("html", "pdf"));
+    if chrome_to_pdf(input, &out).is_ok() && out.exists() { return Ok(out); }
+
+    // LibreOffice（最终兜底）
     office::libreoffice_to_pdf(input, tmp)
 }
 
@@ -619,6 +624,8 @@ fn chrome_to_pdf(input: &Path, output: &Path) -> Result<PathBuf, String> {
     };
 
     let s = std::process::Command::new(&chrome)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .args([
             "--headless=new",
             "--disable-gpu",
