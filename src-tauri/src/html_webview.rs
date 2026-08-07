@@ -88,6 +88,17 @@ pub fn init_print_engine() -> Result<(), String> { Ok(()) }
 
 // ── 转换入口 ───────────────────────────────────────
 
+/// 判断当前平台是否有可用的 HTML→PDF 渲染引擎。
+/// - macOS：内置 WKWebView，始终可用。
+/// - 其它：优先 Chrome headless，其次 LibreOffice / Fulgur（Fulgur 纯 Rust 始终可用）。
+pub fn html_engine_available() -> bool {
+    #[cfg(target_os = "macos")]
+    { true }
+
+    #[cfg(not(target_os = "macos"))]
+    { find_chrome().is_some() || office::libreoffice_available() }
+}
+
 pub fn html_to_pdf(input: &Path, tmp: &Path) -> Result<PathBuf, String> {
     // 1. Chrome headless（渲染最稳定，支持 JS 图表）
     let out = tmp.join(unique_name("html", "pdf"));
@@ -580,27 +591,70 @@ fn fulgur_to_pdf(input: &Path, output: &Path) -> Result<PathBuf, String> {
 // ── 兜底 ─────────────────────────────────────────────
 
 /// Chrome headless（备选渲染：需要本机装 Chrome，新版强制 --headless=new）
+///
+/// 关键点（经实测验证，避免弹出可见 Chrome 窗口）：
+/// - 必须用**每次全新**的独立 `--user-data-dir`，且放在系统 temp 而非用户文档目录：
+///   若已有普通 Chrome 实例在运行，headless 新进程会被委托给现有实例（不执行 headless，
+///   甚至弹出标签页窗口）；若 user-data-dir 内残留 SingletonLock/SingletonCookie 等，
+///   Chrome 会误判已有实例而弹窗。
+/// - 必须加 `--no-first-run` + `--no-default-browser-check` + `--disable-default-apps` 等，
+///   否则全新 profile 首次初始化会加载 chrome://newtab/ 标签页并弹出可见窗口。
+/// - 用 `file:///` URL 而非裸文件路径，确保加载的是本地文件内容。
+/// - 加 `--virtual-time-budget` 等待 JS / 字体渲染完成，避免空白页。
 fn chrome_to_pdf(input: &Path, output: &Path) -> Result<PathBuf, String> {
     let chrome = find_chrome().ok_or("未找到 Chrome")?;
-    // 新版 Chrome 不再支持 --headless 旧模式；--print-to-pdf 必须用 = 把输出路径绑在 flag 上
-    // 否则 URL + 单独 .arg(output) 会被解释为「多个 target」，触发
-    // 「Multiple targets are not supported in headless mode」错误
+    // 打印输出必须用 = 绑在 flag 上，否则 URL + 单独 .arg(output) 会被解释为多个 target
     let print_flag = format!("--print-to-pdf={}", output.display());
+
+    // 独立且每次全新的 user-data-dir，放在系统 temp，避免污染用户文档目录；
+    // 每次调用用唯一名，确保 profile 目录不含残留的 SingletonLock/Cookie/Socket。
+    let profile_dir = std::env::temp_dir().join(unique_name("chrome_profile", ""));
+    let profile_flag = format!("--user-data-dir={}", profile_dir.display());
+
+    // 本地文件用 file:/// URL（将 \ 统一为 /）
+    let file_url = {
+        let p = input.canonicalize().unwrap_or_else(|_| input.to_path_buf());
+        let normalized = p.to_string_lossy().replace('\\', "/");
+        format!("file:///{}", normalized)
+    };
+
     let s = std::process::Command::new(&chrome)
         .args([
             "--headless=new",
             "--disable-gpu",
-            "--no-sandbox",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--disable-default-apps",
+            "--disable-extensions",
+            "--disable-background-networking",
+            "--disable-sync",
+            "--disable-popup-blocking",
+            "--no-pings",
+            "--disable-features=Translate",
+            "--run-all-compositor-stages-before-draw",
             "--no-pdf-header-footer",
+            // 让 JS/字体有时间渲染
+            "--virtual-time-budget=10000",
+            &profile_flag,
             &print_flag,
         ])
-        .arg(input) // URL 必须是唯一的位置参数
+        .arg(&file_url) // URL 必须是唯一的位置参数
         .status()
         .map_err(|e| format!("Chrome: {}", e))?;
-    if s.success() && output.exists() && output.metadata().map(|m| m.len()>0).unwrap_or(false) {
+
+    // 清理临时 profile 目录（含 SingletonLock 等残留，避免下次误判实例）
+    let _ = std::fs::remove_dir_all(&profile_dir);
+
+    // 校验：非空且合理大小（<8KB 多半是空白/空壳 PDF）
+    let ok = s.success()
+        && output.exists()
+        && output.metadata().map(|m| m.len() >= 8 * 1024).unwrap_or(false);
+    if ok {
         Ok(output.to_path_buf())
     } else {
-        Err("Chrome 失败".into())
+        let sz = output.metadata().map(|m| m.len()).unwrap_or(0);
+        log::warn!(target: "html_webview", "Chrome headless 转换失败或输出过小: exit={} size={}", s.code().unwrap_or(-1), sz);
+        Err("Chrome 转换失败或输出异常".into())
     }
 }
 

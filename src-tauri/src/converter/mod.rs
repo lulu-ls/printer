@@ -102,7 +102,7 @@ impl Converter for ImageConverter {
     }
 }
 
-/// HTML WebView 转换器（macOS 用 WKWebView，其他平台用 LibreOffice）
+/// HTML 转换器（macOS 用 WKWebView，其他平台优先 Chrome headless，其次 LibreOffice）
 struct HtmlWebViewConverter;
 impl Converter for HtmlWebViewConverter {
     fn name(&self) -> &'static str {
@@ -115,7 +115,7 @@ impl Converter for HtmlWebViewConverter {
         #[cfg(target_os = "macos")]
         return true;
         #[cfg(not(target_os = "macos"))]
-        return office::libreoffice_available();
+        return crate::html_webview::html_engine_available();
     }
     fn convert(&self, input: &Path, output_dir: &Path) -> Result<traits::ConvertOutput, String> {
         crate::html_webview::html_to_pdf(input, output_dir).map(|path| traits::ConvertOutput {
@@ -202,7 +202,16 @@ impl Converter for LibreOfficeFallback {
         if is_office {
             return Err("需要 LibreOffice 才能转换 Office 文档，请先安装 LibreOffice".into());
         }
-        // 非 Office 格式走系统原生打印兜底
+        // HTML/HTM 必须渲染成 PDF 才能打印：在没有 Chrome / LibreOffice / 其它引擎时
+        // 不能像 txt 那样原样透传（Windows 上 .html 通常没有 Print 动词关联）。
+        // 直接报错并给出安装提示，而不是让上层去用无效的 Shell 打印。
+        if matches!(ext.as_str(), "html" | "htm") {
+            return Err(
+                "需要浏览器或 LibreOffice 才能转换 HTML 打印，请安装 Chrome / LibreOffice 后重试"
+                    .into(),
+            );
+        }
+        // 其它纯文本 / 系统可直接打印的格式走系统原生打印兜底
         Ok(traits::ConvertOutput {
             path: input.to_path_buf(),
             converter: self.name(),

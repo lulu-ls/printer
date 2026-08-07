@@ -9,6 +9,25 @@
 
 use std::path::Path;
 use std::process::Command;
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+/// 在 Windows 上隐藏子进程的控制台窗口（避免打印时弹出黑框）。
+/// `CREATE_NO_WINDOW`(0x08000000)：不为子进程创建控制台窗口。
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// 为命令设置隐藏控制台窗口标志（Windows）；其它平台原样返回。
+#[cfg(target_os = "windows")]
+fn hide_console(mut cmd: Command) -> Command {
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd
+}
+
+#[cfg(not(target_os = "windows"))]
+fn hide_console(cmd: Command) -> Command {
+    cmd
+}
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub fn print_via_mutool(path: &Path, printer: &str, settings: &crate::printer::PrintSettings) -> Result<String, String> {
@@ -47,7 +66,7 @@ pub fn print_via_mutool(path: &Path, printer: &str, settings: &crate::printer::P
 fn print_via_shell_print(path: &Path) -> Result<String, String> {
     let path_str = path.to_string_lossy().replace('\'', "''");
     let script = format!("Start-Process -FilePath '{}' -Verb Print", path_str);
-    let status = Command::new("powershell")
+    let status = hide_console(Command::new("powershell"))
         .args(["-NoProfile", "-Command", &script])
         .status()
         .map_err(|e| format!("无法启动打印进程: {}", e))?;
@@ -92,7 +111,7 @@ pub fn detect_office_com(ext: &str) -> Option<String> {
             "try {{ $o = New-Object -ComObject '{c}'; [void][System.Runtime.Interopservices.Marshal]::ReleaseComObject($o); Write-Output '{c}'; exit }} catch {{ }}; "
         ));
     }
-    let out = Command::new(POWERSHELL_32)
+    let out = hide_console(Command::new(POWERSHELL_32))
         .args(["-NoProfile", "-Command", &script])
         .output()
         .ok()?;
@@ -203,7 +222,7 @@ pub fn print_office_via_com(input: &Path, printer_name: &str) -> Result<String, 
     script.push_str("  try { [void][System.Runtime.Interopservices.Marshal]::ReleaseComObject($app) } catch { }\n");
     script.push_str("}\n");
 
-    let out = Command::new(POWERSHELL_32)
+    let out = hide_console(Command::new(POWERSHELL_32))
         .args(["-NoProfile", "-Command", &script])
         .output()
         .map_err(|e| format!("无法启动 PowerShell 自动化: {}", e))?;

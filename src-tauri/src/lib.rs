@@ -347,6 +347,14 @@ async fn print_file(
     if let Ok(ref pdf) = lo_pdf {
         // 通知前端：转换完成，开始发送打印任务
         let _ = app.emit("print-progress", serde_json::json!({ "fileId": file_id, "status": "sending" }));
+
+        // Windows：转换后得到的 PDF 优先用打包的 SumatraPDF sidecar 静默打印
+        //（静默、可指定打印机、不吊起 WPS 等默认关联程序）；失败再回退通用管线。
+        #[cfg(target_os = "windows")]
+        if let Ok(msg) = printer::windows::print_pdf_via_sumatra(&app, pdf, &printer_name).await {
+            return Ok(msg);
+        }
+
         if let Ok(msg) = printer::print_pdf(pdf, &printer_name, &settings) {
             return Ok(msg);
         }
